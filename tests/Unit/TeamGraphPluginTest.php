@@ -90,7 +90,7 @@ it('TeamGraphApp satisfies VueAppInterface (name + entry)', function (): void {
 
     expect($app->name())->toBe('team-graph')
         ->and($app->displayName())->toBe('Team Graph')
-        ->and($app->icon())->toBe('git-fork')
+        ->and($app->icon())->toBe('M 3.5 5.5 a 1.5 1.5 0 1 0 3 0 a 1.5 1.5 0 1 0 -3 0 M 17.5 5.5 a 1.5 1.5 0 1 0 3 0 a 1.5 1.5 0 1 0 -3 0 M 10.5 18.5 a 1.5 1.5 0 1 0 3 0 a 1.5 1.5 0 1 0 -3 0 M 6.5 5.5 L 17.5 5.5 M 5.71 6.82 L 11.29 17.18 M 18.29 6.82 L 12.71 17.18')
         ->and($app->accent())->toBe('violet')
         ->and($app->entry())->toBe('main.js');
 });

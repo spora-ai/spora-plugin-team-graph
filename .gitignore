@@ -5,3 +5,5 @@
 /.worktrees/
 
 /tmp/
+
+/:memory:
