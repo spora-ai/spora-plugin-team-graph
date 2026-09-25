@@ -74,7 +74,7 @@ it('GET graph returns 200 with the data envelope when the caller controls the pr
         ->and($body['data']['principal']['is_current_user_owned'])->toBeTrue()
         ->and($body['data']['nodes'])->toBeArray()
         ->and($body['data']['edges'])->toBeArray()
-        ->and($body['data']['fixtures'])->toBeArray()
+        ->and($body['data'])->not->toHaveKey('fixtures')
         ->and($body['data']['generated_at'])->toBeString();
 });
 

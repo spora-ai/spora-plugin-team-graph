@@ -106,7 +106,7 @@ it('builds three nodes with the expected aggregates from three agents', function
         ->and($payload['nodes'][1]['recent_chats_24h'])->toBe(1)
         ->and($payload['nodes'][2]['active_chats'])->toBe(0)
         ->and($payload['principal']['is_current_user_owned'])->toBeTrue()
-        ->and($payload['fixtures'])->toHaveCount(3);
+        ->and($payload['generated_at'])->toBeString();
 });
 
 it('dedupes five sub_agent calls across two parent/target pairs into two edges', function (): void {

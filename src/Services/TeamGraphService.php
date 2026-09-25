@@ -39,7 +39,6 @@ final class TeamGraphService
      *     principal: array{id: int, type: string, name: string, is_current_user_owned: bool},
      *     nodes: list<array<string, mixed>>,
      *     edges: list<array<string, mixed>>,
-     *     fixtures: list<array{key: string, label: string}>,
      *     generated_at: string,
      * }
      */
@@ -65,20 +64,7 @@ final class TeamGraphService
             'principal'    => $principalRow,
             'nodes'        => $this->nodes->resolveNodes($principalId),
             'edges'        => $this->edges->resolveEdges($principalId),
-            'fixtures'     => $this->fixtures(),
             'generated_at' => (new DateTimeImmutable())->format(DateTimeInterface::ATOM),
-        ];
-    }
-
-    /**
-     * @return list<array{key: string, label: string}>
-     */
-    private function fixtures(): array
-    {
-        return [
-            ['key' => 'tinyStartup', 'label' => 'Tiny Startup'],
-            ['key' => 'marketing',   'label' => 'Marketing'],
-            ['key' => 'solo',        'label' => 'Solo Workspace'],
         ];
     }
 
