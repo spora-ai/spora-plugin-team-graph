@@ -5,8 +5,16 @@ parameters:
     paths:
         - src
         - tests
+        - routes
     level: 5
     excludePaths:
         - vendor
     bootstrapFiles:
         - vendor/autoload.php
+    ignoreErrors:
+        # Pest's `beforeEach()` binds closure state on the dynamic
+        # `Pest\PendingCalls\TestCall` instance — `$this->plugin` /
+        # `$this->dispatcher` reads/writes properties PHPStan can't
+        # statically infer. Mirrors spora-core's and typst's suites.
+        - '#Access to an undefined property Pest\\PendingCalls\\TestCall::\$plugin\.#'
+        - '#Access to an undefined property Pest\\PendingCalls\\TestCall::\$dispatcher\.#'
