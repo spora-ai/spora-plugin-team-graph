@@ -37,7 +37,7 @@ final class NodeResolver
      *     name: string,
      *     role: string|null,
      *     picture_url: string|null,
-     *     status: string|null,
+     *     status: string,
      *     active_chats: int,
      *     recent_chats_24h: int,
      * }>
@@ -52,12 +52,15 @@ final class NodeResolver
                 a.name,
                 NULL AS role,
                 NULL AS picture_url,
-                (SELECT status
-                   FROM tasks
-                  WHERE agent_id = a.id
-                    AND status IN ('RUNNING','AWAITING_SUB_AGENTS','PENDING_APPROVAL')
-                  ORDER BY created_at DESC
-                  LIMIT 1) AS status,
+                COALESCE(
+                    (SELECT status
+                       FROM tasks
+                      WHERE agent_id = a.id
+                        AND status IN ('RUNNING','AWAITING_SUB_AGENTS','PENDING_APPROVAL')
+                      ORDER BY created_at DESC
+                      LIMIT 1),
+                    'COMPLETED'
+                ) AS status,
                 (SELECT COUNT(*)
                    FROM tasks t
                   WHERE t.agent_id = a.id
@@ -80,7 +83,10 @@ final class NodeResolver
                 'name'            => (string) $row->name,
                 'role'            => $row->role !== null ? (string) $row->role : null,
                 'picture_url'     => $row->picture_url !== null ? (string) $row->picture_url : null,
-                'status'          => $row->status !== null ? (string) $row->status : null,
+                /* COALESCE guarantees the SQL never returns NULL here; the
+                 * null-coalesce operator is defensive against engine
+                 * surprises but should be unreachable in practice. */
+                'status'          => (string) ($row->status ?? 'COMPLETED'),
                 'active_chats'    => (int) $row->active_chats,
                 'recent_chats_24h' => (int) $row->recent_chats_24h,
             ],
