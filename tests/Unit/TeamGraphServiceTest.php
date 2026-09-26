@@ -77,7 +77,7 @@ function seedPrincipal(int $principalId, int $userId): void
     ]);
 }
 
-function seedAgent(int $agentId, int $principalId, bool $archived = false): void
+function seedAgent(int $agentId, int $principalId, bool $archived = false, ?string $paletteKey = null): void
 {
     Capsule::table('agents')->insert([
         'id'           => $agentId,
@@ -89,6 +89,14 @@ function seedAgent(int $agentId, int $principalId, bool $archived = false): void
         'created_at'   => date('Y-m-d H:i:s'),
         'updated_at'   => date('Y-m-d H:i:s'),
     ]);
+    if ($paletteKey !== null) {
+        Capsule::table('agent_pictures')->insert([
+            'agent_id'    => $agentId,
+            'palette_key' => $paletteKey,
+            'created_at'  => date('Y-m-d H:i:s'),
+            'updated_at'  => date('Y-m-d H:i:s'),
+        ]);
+    }
 }
 
 it('builds three nodes with the expected aggregates from three agents', function (): void {
@@ -254,6 +262,62 @@ it('hides archived agents by filtering on is_archived', function (): void {
 
     expect($payload['nodes'])->toHaveCount(2)
         ->and(array_column($payload['nodes'], 'id'))->toBe([10, 12]);
+});
+
+it('resolves each node\'s profile_picture to (bg_color, fg_color) from agent_pictures.palette_key', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(10, 42, paletteKey: 'indigo');
+    seedAgent(11, 42, paletteKey: 'amber');
+
+    $payload = makeService()->buildGraph(42, 1);
+
+    expect($payload['nodes'])->toHaveCount(2);
+    // The hex codes mirror Palette::background()/foreground() in
+    // spora-core/app/Services/AgentPictures/Palette.php — pinning
+    // the exact strings here so a Palette rename (e.g. "indigo" →
+    // "deep-indigo") surfaces as a test diff instead of silently
+    // shifting the canvas colour.
+    expect($payload['nodes'][0]['profile_picture'])->toBe([
+        'bg_color' => '#4338CA',
+        'fg_color' => '#EEF2FF',
+    ]);
+    expect($payload['nodes'][1]['profile_picture'])->toBe([
+        'bg_color' => '#D97706',
+        'fg_color' => '#FFFBEB',
+    ]);
+});
+
+it('falls back to Slate palette when an agent has no agent_pictures row', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(10, 42); // no paletteKey → no row seeded
+
+    $payload = makeService()->buildGraph(42, 1);
+
+    // ProfilePictureService::defaultWireShape() uses Slate when no
+    // row exists; we mirror that default so the canvas never has
+    // a node without a usable (bg, fg) pair.
+    expect($payload['nodes'][0]['profile_picture'])->toBe([
+        'bg_color' => '#475569',
+        'fg_color' => '#F8FAFC',
+    ]);
+});
+
+it('falls back to Slate palette when an unknown palette_key is on the row', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(10, 42, paletteKey: 'mauve-from-an-old-version');
+
+    $payload = makeService()->buildGraph(42, 1);
+
+    // Drift resilience: a palette renamed upstream shouldn't 500
+    // the graph endpoint. Slate is the safest fallback because
+    // it's the default in ProfilePictureService too.
+    expect($payload['nodes'][0]['profile_picture'])->toBe([
+        'bg_color' => '#475569',
+        'fg_color' => '#F8FAFC',
+    ]);
 });
 
 it('throws PrincipalNotAccessibleException when the caller does not control the principal', function (): void {

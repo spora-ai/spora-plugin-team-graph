@@ -11,6 +11,8 @@ use Spora\Plugins\TeamGraph\Http\TeamGraphController;
 use Spora\Plugins\TeamGraph\Services\EdgeResolver;
 use Spora\Plugins\TeamGraph\Services\NodeResolver;
 use Spora\Plugins\TeamGraph\Services\TeamGraphService;
+use Spora\Services\ToolConfigService;
+use Spora\Services\ToolConfigServiceInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
@@ -49,14 +51,23 @@ final class TeamGraphPlugin extends AbstractPlugin implements EventSubscriberInt
      * Register the team-graph service stack + controller so PHP-DI can
      * autowire them at request-dispatch time. The NodeResolver +
      * EdgeResolver leaves autowired (zero constructor params).
+     *
+     * `ToolConfigServiceInterface` is bound explicitly to the
+     * concrete `ToolConfigService` because PHP-DI cannot autowire
+     * an interface without an alias — the host's container binds
+     * the concrete only (see spora-core's
+     * `app/Core/ContainerDefinitions.php:566`), so without this
+     * alias every controller request throws an
+     * `InvalidDefinition` for the interface.
      */
     public function onContainerBuilding(ContainerBuildingEvent $event): void
     {
         $event->builder()->addDefinitions([
-            TeamGraphService::class   => \DI\autowire(),
-            TeamGraphController::class => \DI\autowire(),
-            NodeResolver::class       => \DI\autowire(),
-            EdgeResolver::class       => \DI\autowire(),
+            TeamGraphService::class              => \DI\autowire(),
+            TeamGraphController::class           => \DI\autowire(),
+            NodeResolver::class                  => \DI\autowire(),
+            EdgeResolver::class                  => \DI\autowire(),
+            ToolConfigServiceInterface::class    => \DI\get(ToolConfigService::class),
         ]);
     }
 
