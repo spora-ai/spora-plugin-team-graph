@@ -264,7 +264,7 @@ it('hides archived agents by filtering on is_archived', function (): void {
         ->and(array_column($payload['nodes'], 'id'))->toBe([10, 12]);
 });
 
-it('resolves each node\'s profile_picture to (bg_color, fg_color) from agent_pictures.palette_key', function (): void {
+it('resolves each node\'s profile_picture to (palette_key, bg_color, fg_color) from agent_pictures.palette_key', function (): void {
     seedUser(1, 'o@example.com');
     seedPrincipal(42, 1);
     seedAgent(10, 42, paletteKey: 'indigo');
@@ -277,14 +277,18 @@ it('resolves each node\'s profile_picture to (bg_color, fg_color) from agent_pic
     // spora-core/app/Services/AgentPictures/Palette.php — pinning
     // the exact strings here so a Palette rename (e.g. "indigo" →
     // "deep-indigo") surfaces as a test diff instead of silently
-    // shifting the canvas colour.
+    // shifting the canvas colour. `palette_key` is shipped on the
+    // wire so the frontend can attach a Mermaid classDef without
+    // re-deriving from bg_color.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
-        'bg_color' => '#4338CA',
-        'fg_color' => '#EEF2FF',
+        'palette_key' => 'indigo',
+        'bg_color'    => '#4338CA',
+        'fg_color'    => '#EEF2FF',
     ]);
     expect($payload['nodes'][1]['profile_picture'])->toBe([
-        'bg_color' => '#D97706',
-        'fg_color' => '#FFFBEB',
+        'palette_key' => 'amber',
+        'bg_color'    => '#D97706',
+        'fg_color'    => '#FFFBEB',
     ]);
 });
 
@@ -299,8 +303,9 @@ it('falls back to Slate palette when an agent has no agent_pictures row', functi
     // row exists; we mirror that default so the canvas never has
     // a node without a usable (bg, fg) pair.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
-        'bg_color' => '#475569',
-        'fg_color' => '#F8FAFC',
+        'palette_key' => 'slate',
+        'bg_color'    => '#475569',
+        'fg_color'    => '#F8FAFC',
     ]);
 });
 
@@ -315,8 +320,9 @@ it('falls back to Slate palette when an unknown palette_key is on the row', func
     // the graph endpoint. Slate is the safest fallback because
     // it's the default in ProfilePictureService too.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
-        'bg_color' => '#475569',
-        'fg_color' => '#F8FAFC',
+        'palette_key' => 'slate',
+        'bg_color'    => '#475569',
+        'fg_color'    => '#F8FAFC',
     ]);
 });
 

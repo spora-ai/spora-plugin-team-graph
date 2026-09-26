@@ -51,7 +51,7 @@ final class NodeResolver
      *     status: string,
      *     active_chats: int,
      *     recent_chats_24h: int,
-     *     profile_picture: array{bg_color: string, fg_color: string},
+     *     profile_picture: array{palette_key: string, bg_color: string, fg_color: string},
      * }>
      */
     public function resolveNodes(int $principalId): array
@@ -118,8 +118,9 @@ final class NodeResolver
                     'active_chats'    => (int) $row->active_chats,
                     'recent_chats_24h' => (int) $row->recent_chats_24h,
                     'profile_picture' => [
-                        'bg_color' => $palette->background(),
-                        'fg_color' => $palette->foreground(),
+                        'palette_key' => $palette->value,
+                        'bg_color'    => $palette->background(),
+                        'fg_color'    => $palette->foreground(),
                     ],
                 ];
             },
