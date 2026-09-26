@@ -1,13 +1,14 @@
 {
     "$schema": "https://docs.spora-ai.com/schemas/plugin.schema.json",
-    "name": "spora-ai/spora-plugin-skeleton",
-    "slug": "skeleton",
-    "description": "Skeleton plugin — replace this with your plugin's description.",
-    "class": "Spora\\Plugins\\Skeleton\\SkeletonPlugin",
-    "icon": "puzzle",
+    "name": "spora-ai/spora-plugin-team-graph",
+    "slug": "team-graph",
+    "description": "A directed graph of the spawning relationships between this principal's agents. Renders via Mermaid in the admin SPA.",
+    "class": "Spora\\Plugins\\TeamGraph\\TeamGraphPlugin",
+    "icon": "M 3.5 5.5 a 1.5 1.5 0 1 0 3 0 a 1.5 1.5 0 1 0 -3 0 M 17.5 5.5 a 1.5 1.5 0 1 0 3 0 a 1.5 1.5 0 1 0 -3 0 M 10.5 18.5 a 1.5 1.5 0 1 0 3 0 a 1.5 1.5 0 1 0 -3 0 M 6.5 5.5 L 17.5 5.5 M 5.71 6.82 L 11.29 17.18 M 18.29 6.82 L 12.71 17.18",
+    "accent": "violet",
     "autoload": {
         "psr-4": {
-            "Spora\\Plugins\\Skeleton\\": "src/"
+            "Spora\\Plugins\\TeamGraph\\": "src/"
         }
     }
 }
