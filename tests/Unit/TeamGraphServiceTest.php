@@ -3,12 +3,15 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Mockery as M;
 use Spora\Plugins\TeamGraph\Services\EdgeResolver;
 use Spora\Plugins\TeamGraph\Services\NodeResolver;
 use Spora\Plugins\TeamGraph\Services\TeamGraphService;
 use Spora\Services\Exceptions\PrincipalNotAccessibleException;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Services\ToolConfigServiceInterface;
+use Spora\Tools\SubAgentTool;
 
 /**
  * Integration coverage for {@see TeamGraphService}. The resolvers
@@ -17,13 +20,33 @@ use Spora\Services\PrincipalService;
  * suite uses, seeded with the rows each scenario needs. The service's
  * real job — principal gate + envelope assembly — is exercised by
  * every test.
+ *
+ * EdgeResolver depends on {@see ToolConfigServiceInterface}, which is
+ * mocked so each scenario can script its own `allowed_target_agents`
+ * per agent. The mock only needs `getEffectiveSettings(SubAgentTool,
+ * $agentId, …)` — every other call returns a no-op default.
  */
 
-function makeService(): TeamGraphService
+function makeService(?ToolConfigServiceInterface $toolConfig = null): TeamGraphService
 {
     $principals = new PrincipalService(new PrincipalResolver());
+    $edges      = new EdgeResolver($toolConfig ?? mockToolConfig([]));
 
-    return new TeamGraphService(new NodeResolver(), new EdgeResolver(), $principals);
+    return new TeamGraphService(new NodeResolver(), $edges, $principals);
+}
+
+/**
+ * @param  array<int, list<int>> $allowlistByAgentId source-agent-id → list of target agent ids
+ */
+function mockToolConfig(array $allowlistByAgentId): ToolConfigServiceInterface
+{
+    $mock = M::mock(ToolConfigServiceInterface::class);
+    $mock->shouldReceive('getEffectiveSettings')
+        ->andReturnUsing(static function (string $toolClass, int $agentId) use ($allowlistByAgentId): array {
+            expect($toolClass)->toBe(SubAgentTool::class);
+            return ['allowed_target_agents' => $allowlistByAgentId[$agentId] ?? []];
+        });
+    return $mock;
 }
 
 function seedUser(int $userId, string $email): void
@@ -109,22 +132,40 @@ it('builds three nodes with the expected aggregates from three agents', function
         ->and($payload['generated_at'])->toBeString();
 });
 
-it('dedupes five sub_agent calls across two parent/target pairs into two edges', function (): void {
+it('emits one edge per configured target, including targets that have never been spawned', function (): void {
     seedUser(1, 'o@example.com');
     seedPrincipal(42, 1);
-    seedAgent(11, 42); // parent
-    seedAgent(12, 42); // parent
-    seedAgent(4, 42);  // shared target for agent 11
-    seedAgent(7, 42);  // shared target for agent 12
+    seedAgent(11, 42); // source: configured to spawn 4 and 7
+    seedAgent(12, 42); // source: configured to spawn 7 only
+    seedAgent(4, 42);  // target 1 of 11
+    seedAgent(7, 42);  // shared target
 
-    // 3 calls from 11 → 4, 2 calls from 12 → 7.
+    $service = makeService(mockToolConfig([
+        11 => [4, 7],
+        12 => [7],
+    ]));
+
+    $payload = $service->buildGraph(42, 1);
+
+    expect($payload['edges'])->toHaveCount(3)
+        ->and(array_column($payload['edges'], 'id'))->toBe(['11->4', '11->7', '12->7'])
+        ->and($payload['edges'][0]['configured'])->toBeTrue()
+        ->and($payload['edges'][0]['count_24h'])->toBe(0)
+        ->and($payload['edges'][0]['last_invoked_at'])->toBeNull();
+});
+
+it('enriches configured edges with last-24h tool_call counts and last_invoked_at', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(11, 42); // source
+    seedAgent(4, 42);  // target
+
+    // 3 calls from 11 → 4 within the last 24h.
     $now = time();
     $calls = [
         [200, 11, 4,  $now - 60],
         [201, 11, 4,  $now - 30],
         [202, 11, 4,  $now - 10],
-        [203, 12, 7,  $now - 50],
-        [204, 12, 7,  $now - 20],
     ];
     foreach ($calls as [$taskId, $parentId, $targetId, $createdAt]) {
         Capsule::table('tasks')->insert([
@@ -152,48 +193,52 @@ it('dedupes five sub_agent calls across two parent/target pairs into two edges',
         ]);
     }
 
-    $payload = makeService()->buildGraph(42, 1);
+    $service = makeService(mockToolConfig([
+        11 => [4],
+    ]));
 
-    expect($payload['edges'])->toHaveCount(2)
-        ->and(array_column($payload['edges'], 'id'))->toBe(['11->4', '12->7'])
+    $payload = $service->buildGraph(42, 1);
+
+    expect($payload['edges'])->toHaveCount(1)
+        ->and($payload['edges'][0]['id'])->toBe('11->4')
         ->and($payload['edges'][0]['count_24h'])->toBe(3)
-        ->and($payload['edges'][1]['count_24h'])->toBe(2);
+        ->and($payload['edges'][0]['last_invoked_at'])->toBe(date('Y-m-d H:i:s', $now - 10));
 });
 
-it('drops cross-principal target edges (defence-in-depth)', function (): void {
+it('drops cross-principal configured targets (defence-in-depth)', function (): void {
     seedUser(1, 'o@example.com');
     seedPrincipal(42, 1);
     seedUser(99, 'foreign@example.com');
     seedPrincipal(99, 99);
-    seedAgent(11, 42);
-    seedAgent(4, 99); // target in a different principal
+    seedAgent(11, 42);            // source in principal 42
+    seedAgent(4, 99);             // target in foreign principal 99
+    seedAgent(7, 42);             // target in same principal
 
-    $now = time();
-    Capsule::table('tasks')->insert([
-        'id'           => 200,
-        'agent_id'     => 11,
-        'principal_id' => 42,
-        'status'       => 'COMPLETED',
-        'user_prompt'  => 'spawn',
-        'created_at'   => date('Y-m-d H:i:s', $now - 5),
-        'updated_at'   => date('Y-m-d H:i:s', $now),
-    ]);
-    Capsule::table('tool_calls')->insert([
-        'id'                 => 2000,
-        'task_id'            => 200,
-        'agent_id'           => 11,
-        'provider_call_id'   => 'p_200',
-        'tool_name'          => 'sub_agent',
-        'tool_class'         => 'Spora\\Tools\\SubAgentTool',
-        'tool_type'          => 'output',
-        'status'             => 'EXECUTED',
-        'proposed_arguments' => json_encode(['target_agent_id' => 4]),
-        'approved_arguments' => json_encode(['target_agent_id' => 4]),
-        'created_at'         => date('Y-m-d H:i:s', $now),
-        'updated_at'         => date('Y-m-d H:i:s', $now),
-    ]);
+    // The source agent's allowlist incorrectly references a foreign
+    // agent (4) — a stale override or a drift after a principal
+    // transfer. The runtime would refuse to fire this edge; the
+    // team-graph view must hide it too.
+    $service = makeService(mockToolConfig([
+        11 => [4, 7],
+    ]));
 
-    $payload = makeService()->buildGraph(42, 1);
+    $payload = $service->buildGraph(42, 1);
+
+    expect($payload['edges'])->toHaveCount(1)
+        ->and($payload['edges'][0]['target'])->toBe(7);
+});
+
+it('does not emit an edge for an agent with no configured sub-agents', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(11, 42); // source: empty allowlist (schema default)
+
+    // The mock returns ['allowed_target_agents' => []] for any agent
+    // not in the explicit map — same shape `getEffectiveSettings`
+    // would return when only defaults are present.
+    $service = makeService(mockToolConfig([]));
+
+    $payload = $service->buildGraph(42, 1);
 
     expect($payload['edges'])->toBe([]);
 });

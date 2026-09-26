@@ -63,7 +63,7 @@ final class TeamGraphService
         return [
             'principal'    => $principalRow,
             'nodes'        => $this->nodes->resolveNodes($principalId),
-            'edges'        => $this->edges->resolveEdges($principalId),
+            'edges'        => $this->edges->resolveEdges($principalId, $callerUserId),
             'generated_at' => (new DateTimeImmutable())->format(DateTimeInterface::ATOM),
         ];
     }

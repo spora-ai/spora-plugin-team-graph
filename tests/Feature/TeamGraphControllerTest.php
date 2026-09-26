@@ -2,12 +2,14 @@
 
 declare(strict_types=1);
 
+use Mockery as M;
 use Spora\Plugins\TeamGraph\Http\TeamGraphController;
 use Spora\Plugins\TeamGraph\Services\EdgeResolver;
 use Spora\Plugins\TeamGraph\Services\NodeResolver;
 use Spora\Plugins\TeamGraph\Services\TeamGraphService;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
+use Spora\Services\ToolConfigServiceInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -22,6 +24,9 @@ use Symfony\Component\HttpFoundation\Response;
  *   - GET with an uncontrolled principal → 403,
  *   - GET without an authenticated session → 401 (the controller
  *     short-circuits before the service is even called).
+ *
+ * The fixture graph is empty (no agents, no edges) — the controller
+ * envelope is what these tests pin, not the resolvers' behaviour.
  */
 
 const GRAPH_PATH = '/api/v1/plugins/team-graph/graph';
@@ -30,7 +35,14 @@ function makeGraphController(): array
 {
     $auth = bootAuthLayer();
     $principals = new PrincipalService(new PrincipalResolver());
-    $service = new TeamGraphService(new NodeResolver(), new EdgeResolver(), $principals);
+    $toolConfig = M::mock(ToolConfigServiceInterface::class);
+    $toolConfig->shouldReceive('getEffectiveSettings')
+        ->andReturn(['allowed_target_agents' => []]);
+    $service = new TeamGraphService(
+        new NodeResolver(),
+        new EdgeResolver($toolConfig),
+        $principals,
+    );
     $controller = new TeamGraphController($auth, $service);
 
     return [$controller, $auth, $principals];
