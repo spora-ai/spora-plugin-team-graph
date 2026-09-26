@@ -30,15 +30,24 @@ use Spora\Services\AgentPictures\Palette;
  * rather than in the controller so every downstream consumer sees
  * the same filtered set.
  *
- * The icon-color payload (`profile_picture`) is sourced from a
- * LEFT JOIN against `agent_pictures.palette_key`, resolved through
- * {@see Palette} to a (bg_color, fg_color) hex pair. The host's
- * `AgentPictureService::toWireShape()` returns the same shape for
- * single agents; we replicate the resolution here so a single SQL
- * pass covers the whole principal (no N+1 against `agent_pictures`).
- * Agents with no picture row default to the `Slate` palette —
- * matching `ProfilePictureService::defaultWireShape()` and the
- * dashboard's deterministic blank-state.
+ * The `profile_picture` block mirrors the host's
+ * `ProfilePictureService::pictureToWire()` output:
+ *
+ *   - `kind === 'image'` when `agent_pictures.media_asset_id` is set
+ *     (operator uploaded a picture); `image_url` comes from the joined
+ *     `media_assets.asset_url` and `image_updated_at` from
+ *     `media_assets.updated_at` (cache buster).
+ *   - `kind === 'avatar'` for the picked-archetype path;
+ *     `bg_color` / `fg_color` are resolved server-side from
+ *     `palette_key` via `Palette::background()/foreground()`.
+ *   - All fields are null in the inactive branch (no agent_pictures
+ *     row → Avatar.vue's initials-fallback fires client-side).
+ *
+ * Replicating the host's wire-shape here means a single SQL pass
+ * covers the whole principal (no N+1 against `agent_pictures` or
+ * `media_assets`). Agents with no picture row default to the
+ * `Slate` palette so the canvas never goes blank because of a
+ * missing avatar — the host's `defaultWireShape()` does the same.
  */
 final class NodeResolver
 {
@@ -51,7 +60,16 @@ final class NodeResolver
      *     status: string,
      *     active_chats: int,
      *     recent_chats_24h: int,
-     *     profile_picture: array{palette_key: string, bg_color: string, fg_color: string},
+     *     profile_picture: array{
+     *         kind: 'avatar'|'image',
+     *         archetype: string|null,
+     *         variant_key: string|null,
+     *         palette_key: string|null,
+     *         bg_color: string|null,
+     *         fg_color: string|null,
+     *         image_url: string|null,
+     *         image_updated_at: string|null,
+     *     },
      * }>
      */
     public function resolveNodes(int $principalId): array
@@ -64,7 +82,13 @@ final class NodeResolver
                 a.name,
                 NULL AS role,
                 NULL AS picture_url,
-                ap.palette_key AS palette_key,
+                ap.id AS picture_id,
+                ap.archetype,
+                ap.variant_key,
+                ap.palette_key,
+                ap.media_asset_id,
+                ma.asset_url AS image_url,
+                ma.updated_at AS image_updated_at,
                 COALESCE(
                     (SELECT status
                        FROM tasks
@@ -84,9 +108,10 @@ final class NodeResolver
                     AND t.created_at >= ?) AS recent_chats_24h
               FROM agents a
               LEFT JOIN agent_pictures ap ON ap.agent_id = a.id
+              LEFT JOIN media_assets ma   ON ma.id = ap.media_asset_id
              WHERE a.principal_id = ?
                AND a.is_archived = 0
-             GROUP BY a.id, ap.palette_key
+             GROUP BY a.id, ap.id, ma.id
         SQL;
 
         $rows = Capsule::connection()->select($sql, [$cutoff, $principalId]);
@@ -106,6 +131,8 @@ final class NodeResolver
                  */
                 $palette ??= Palette::Slate;
 
+                $hasImage = $row->media_asset_id !== null;
+
                 return [
                     'id'              => (int) $row->id,
                     'name'            => (string) $row->name,
@@ -118,9 +145,16 @@ final class NodeResolver
                     'active_chats'    => (int) $row->active_chats,
                     'recent_chats_24h' => (int) $row->recent_chats_24h,
                     'profile_picture' => [
-                        'palette_key' => $palette->value,
-                        'bg_color'    => $palette->background(),
-                        'fg_color'    => $palette->foreground(),
+                        'kind'             => $hasImage ? 'image' : 'avatar',
+                        'archetype'        => $hasImage ? null : ($row->archetype !== null ? (string) $row->archetype : null),
+                        'variant_key'      => $hasImage ? null : ($row->variant_key !== null ? (string) $row->variant_key : null),
+                        'palette_key'      => $hasImage ? null : $palette->value,
+                        'bg_color'         => $hasImage ? null : $palette->background(),
+                        'fg_color'         => $hasImage ? null : $palette->foreground(),
+                        'image_url'        => $hasImage && $row->image_url !== null ? (string) $row->image_url : null,
+                        'image_updated_at' => $hasImage && $row->image_updated_at !== null
+                            ? \Carbon\Carbon::parse((string) $row->image_updated_at)->format(\DateTimeInterface::ATOM)
+                            : null,
                     ],
                 ];
             },

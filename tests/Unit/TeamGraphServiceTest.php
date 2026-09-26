@@ -264,7 +264,7 @@ it('hides archived agents by filtering on is_archived', function (): void {
         ->and(array_column($payload['nodes'], 'id'))->toBe([10, 12]);
 });
 
-it('resolves each node\'s profile_picture to (palette_key, bg_color, fg_color) from agent_pictures.palette_key', function (): void {
+it('resolves each node\'s profile_picture (full host wire shape) from agent_pictures.palette_key', function (): void {
     seedUser(1, 'o@example.com');
     seedPrincipal(42, 1);
     seedAgent(10, 42, paletteKey: 'indigo');
@@ -273,22 +273,30 @@ it('resolves each node\'s profile_picture to (palette_key, bg_color, fg_color) f
     $payload = makeService()->buildGraph(42, 1);
 
     expect($payload['nodes'])->toHaveCount(2);
-    // The hex codes mirror Palette::background()/foreground() in
-    // spora-core/app/Services/AgentPictures/Palette.php — pinning
-    // the exact strings here so a Palette rename (e.g. "indigo" →
-    // "deep-indigo") surfaces as a test diff instead of silently
-    // shifting the canvas colour. `palette_key` is shipped on the
-    // wire so the frontend can attach a Mermaid classDef without
-    // re-deriving from bg_color.
+    // The full wire shape mirrors the host's
+    // `ProfilePictureService::pictureToWire()` output so the canvas
+    // can render the same `Avatar.vue` shape (image / archetype /
+    // initials) the dashboard does. Pinning the exact strings here
+    // catches Palette renames + archetype enum drift.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
-        'palette_key' => 'indigo',
-        'bg_color'    => '#4338CA',
-        'fg_color'    => '#EEF2FF',
+        'kind'             => 'avatar',
+        'archetype'        => null,
+        'variant_key'      => null,
+        'palette_key'      => 'indigo',
+        'bg_color'         => '#4338CA',
+        'fg_color'         => '#EEF2FF',
+        'image_url'        => null,
+        'image_updated_at' => null,
     ]);
     expect($payload['nodes'][1]['profile_picture'])->toBe([
-        'palette_key' => 'amber',
-        'bg_color'    => '#D97706',
-        'fg_color'    => '#FFFBEB',
+        'kind'             => 'avatar',
+        'archetype'        => null,
+        'variant_key'      => null,
+        'palette_key'      => 'amber',
+        'bg_color'         => '#D97706',
+        'fg_color'         => '#FFFBEB',
+        'image_url'        => null,
+        'image_updated_at' => null,
     ]);
 });
 
@@ -301,11 +309,19 @@ it('falls back to Slate palette when an agent has no agent_pictures row', functi
 
     // ProfilePictureService::defaultWireShape() uses Slate when no
     // row exists; we mirror that default so the canvas never has
-    // a node without a usable (bg, fg) pair.
+    // a node without a usable (bg, fg) pair. The kind stays
+    // 'avatar' (it's not 'image') and the colour fields are
+    // populated so Avatar.vue's archetype-fallback can render the
+    // agent tile instead of falling through to initials.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
-        'palette_key' => 'slate',
-        'bg_color'    => '#475569',
-        'fg_color'    => '#F8FAFC',
+        'kind'             => 'avatar',
+        'archetype'        => null,
+        'variant_key'      => null,
+        'palette_key'      => 'slate',
+        'bg_color'         => '#475569',
+        'fg_color'         => '#F8FAFC',
+        'image_url'        => null,
+        'image_updated_at' => null,
     ]);
 });
 
@@ -320,9 +336,14 @@ it('falls back to Slate palette when an unknown palette_key is on the row', func
     // the graph endpoint. Slate is the safest fallback because
     // it's the default in ProfilePictureService too.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
-        'palette_key' => 'slate',
-        'bg_color'    => '#475569',
-        'fg_color'    => '#F8FAFC',
+        'kind'             => 'avatar',
+        'archetype'        => null,
+        'variant_key'      => null,
+        'palette_key'      => 'slate',
+        'bg_color'         => '#475569',
+        'fg_color'         => '#F8FAFC',
+        'image_url'        => null,
+        'image_updated_at' => null,
     ]);
 });
 
