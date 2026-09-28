@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\TeamGraph\Services;
 
+use DateTimeInterface;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Services\AgentPictures\Palette;
 
@@ -153,7 +154,7 @@ final class NodeResolver
                         'fg_color'         => $hasImage ? null : $palette->foreground(),
                         'image_url'        => $hasImage && $row->image_url !== null ? (string) $row->image_url : null,
                         'image_updated_at' => $hasImage && $row->image_updated_at !== null
-                            ? \Carbon\Carbon::parse((string) $row->image_updated_at)->format(\DateTimeInterface::ATOM)
+                            ? \Carbon\Carbon::parse((string) $row->image_updated_at)->format(DateTimeInterface::ATOM)
                             : null,
                     ],
                 ];
