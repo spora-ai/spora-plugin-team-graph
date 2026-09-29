@@ -77,8 +77,14 @@ function seedPrincipal(int $principalId, int $userId): void
     ]);
 }
 
-function seedAgent(int $agentId, int $principalId, bool $archived = false, ?string $paletteKey = null): void
-{
+function seedAgent(
+    int $agentId,
+    int $principalId,
+    bool $archived = false,
+    ?string $paletteKey = null,
+    ?string $archetype = null,
+    ?string $variantKey = null,
+): void {
     Capsule::table('agents')->insert([
         'id'           => $agentId,
         'principal_id' => $principalId,
@@ -89,10 +95,14 @@ function seedAgent(int $agentId, int $principalId, bool $archived = false, ?stri
         'created_at'   => date('Y-m-d H:i:s'),
         'updated_at'   => date('Y-m-d H:i:s'),
     ]);
-    if ($paletteKey !== null) {
+    if ($paletteKey !== null || $archetype !== null || $variantKey !== null) {
         Capsule::table('agent_pictures')->insert([
             'agent_id'    => $agentId,
             'palette_key' => $paletteKey,
+            'archetype'   => $archetype,
+            // Left as SQL NULL when the caller passes null, which is the
+            // case the variant-derivation tests below depend on.
+            'variant_key' => $variantKey,
             'created_at'  => date('Y-m-d H:i:s'),
             'updated_at'  => date('Y-m-d H:i:s'),
         ]);
@@ -281,7 +291,9 @@ it('resolves each node\'s profile_picture (full host wire shape) from agent_pict
     expect($payload['nodes'][0]['profile_picture'])->toBe([
         'kind'             => 'avatar',
         'archetype'        => null,
-        'variant_key'      => null,
+        // Derived, never null — see the derivation tests below.
+        // `fnv1a(10) % 3`.
+        'variant_key'      => 'v0',
         'palette_key'      => 'indigo',
         'bg_color'         => '#4338CA',
         'fg_color'         => '#EEF2FF',
@@ -291,7 +303,8 @@ it('resolves each node\'s profile_picture (full host wire shape) from agent_pict
     expect($payload['nodes'][1]['profile_picture'])->toBe([
         'kind'             => 'avatar',
         'archetype'        => null,
-        'variant_key'      => null,
+        // `fnv1a(11) % 3`.
+        'variant_key'      => 'v2',
         'palette_key'      => 'amber',
         'bg_color'         => '#D97706',
         'fg_color'         => '#FFFBEB',
@@ -312,11 +325,12 @@ it('falls back to Slate palette when an agent has no agent_pictures row', functi
     // a node without a usable (bg, fg) pair. The kind stays
     // 'avatar' (it's not 'image') and the colour fields are
     // populated so Avatar.vue's archetype-fallback can render the
-    // agent tile instead of falling through to initials.
+    // agent tile instead of falling through to initials. The host's
+    // default also *derives* the variant, so `fnv1a(10) % 3` = v0.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
         'kind'             => 'avatar',
         'archetype'        => null,
-        'variant_key'      => null,
+        'variant_key'      => 'v0',
         'palette_key'      => 'slate',
         'bg_color'         => '#475569',
         'fg_color'         => '#F8FAFC',
@@ -338,12 +352,107 @@ it('falls back to Slate palette when an unknown palette_key is on the row', func
     expect($payload['nodes'][0]['profile_picture'])->toBe([
         'kind'             => 'avatar',
         'archetype'        => null,
-        'variant_key'      => null,
+        // Derived, never null — `fnv1a(10) % 3`.
+        'variant_key'      => 'v0',
         'palette_key'      => 'slate',
         'bg_color'         => '#475569',
         'fg_color'         => '#F8FAFC',
         'image_url'        => null,
         'image_updated_at' => null,
+    ]);
+});
+
+it('derives a missing variant_key instead of shipping null on the avatar branch', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    // The two shapes the bug was reported on: an archetype is configured,
+    // a variant is not. `agent_pictures.variant_key` is SQL NULL for both.
+    seedAgent(9, 42, paletteKey: 'teal', archetype: 'analyst');
+    seedAgent(10, 42, paletteKey: 'orange', archetype: 'writer');
+
+    $payload = makeService()->buildGraph(42, 1);
+
+    foreach ($payload['nodes'] as $node) {
+        $picture = $node['profile_picture'];
+        expect($picture['kind'])->toBe('avatar');
+        expect($picture['archetype'])->not->toBeNull();
+        // The regression: null here makes the shared `Avatar` fail its
+        // `typeof variant_key === 'string'` guard and fall through to the
+        // initials branch, so the card showed "SC" / "ST" instead of the
+        // agent's glyph while the dashboard showed the glyph.
+        expect($picture['variant_key'])->toBeString();
+        expect($picture['variant_key'])->toMatch('/^v[0-2]$/');
+    }
+    // Pinned so a change to the derivation is a deliberate one. These are
+    // the host's `fnv1a(agent_id) % 3`: 9 → v2, 10 → v0.
+    expect($payload['nodes'][0]['profile_picture']['variant_key'])->toBe('v2');
+    expect($payload['nodes'][1]['profile_picture']['variant_key'])->toBe('v0');
+});
+
+it('derives exactly the variant the host\'s own AgentPictureService would', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    // Nine ids, so the derivation is exercised across all three buckets
+    // and a divergence from the host cannot hide behind one lucky id.
+    foreach ([1, 2, 3, 4, 5, 6, 7, 8, 9] as $agentId) {
+        seedAgent($agentId, 42, paletteKey: 'slate', archetype: 'assistant');
+    }
+
+    $nodes = makeService()->buildGraph(42, 1)['nodes'];
+    $host  = new Spora\Services\AgentPictures\AgentPictureService();
+
+    foreach ($nodes as $node) {
+        $id = $node['id'];
+        expect($node['profile_picture']['variant_key'])
+            ->toBe($host->toWireShape($id)['variant_key'], "variant for agent {$id} matches the host");
+        // And the archetype / palette pair, while we are here.
+        expect($node['profile_picture']['archetype'])->toBe($host->toWireShape($id)['archetype']);
+        expect($node['profile_picture']['bg_color'])->toBe($host->toWireShape($id)['bg_color']);
+    }
+    // Not vacuous: at least two of the three buckets were actually hit.
+    $buckets = array_unique(array_column(array_column($nodes, 'profile_picture'), 'variant_key'));
+    expect(count($buckets))->toBeGreaterThan(1);
+});
+
+it('keeps an operator-chosen variant_key untouched', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(11, 42, paletteKey: 'violet', archetype: 'creative', variantKey: 'v2');
+
+    $payload = makeService()->buildGraph(42, 1);
+
+    // The derivation is a *fallback*, not an override.
+    expect($payload['nodes'][0]['profile_picture']['variant_key'])->toBe('v2');
+});
+
+it('sends no variant at all on the image branch, where the archetype is replaced', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(3, 42, paletteKey: 'slate', archetype: 'assistant');
+    Capsule::table('media_assets')->insert([
+        'id'           => 'asset-1',
+        'user_id'      => 1,
+        'asset_url'    => '/api/v1/assets/asset-1.jpg',
+        'media_type'   => 'image',
+        'mime_type'    => 'image/jpeg',
+        'storage_mode' => 'local',
+        'created_at'   => date('Y-m-d H:i:s'),
+        'updated_at'   => date('Y-m-d H:i:s'),
+    ]);
+    Capsule::table('agent_pictures')->where('agent_id', 3)->update(['media_asset_id' => 'asset-1']);
+
+    $payload = makeService()->buildGraph(42, 1);
+
+    // An uploaded picture is the whole tile; the archetype branch is not
+    // taken, so there is no variant to derive.
+    expect($payload['nodes'][0]['profile_picture'])->toMatchArray([
+        'kind'             => 'image',
+        'archetype'        => null,
+        'variant_key'      => null,
+        'palette_key'      => null,
+        'bg_color'         => null,
+        'fg_color'         => null,
+        'image_url'        => '/api/v1/assets/asset-1.jpg',
     ]);
 });
 

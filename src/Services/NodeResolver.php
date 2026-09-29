@@ -32,7 +32,7 @@ use Spora\Services\AgentPictures\Palette;
  * the same filtered set.
  *
  * The `profile_picture` block mirrors the host's
- * `ProfilePictureService::pictureToWire()` output:
+ * `AgentPictureService::avatarWireShape()` / `imageWireShape()` output:
  *
  *   - `kind === 'image'` when `agent_pictures.media_asset_id` is set
  *     (operator uploaded a picture); `image_url` comes from the joined
@@ -40,19 +40,29 @@ use Spora\Services\AgentPictures\Palette;
  *     `media_assets.updated_at` (cache buster).
  *   - `kind === 'avatar'` for the picked-archetype path;
  *     `bg_color` / `fg_color` are resolved server-side from
- *     `palette_key` via `Palette::background()/foreground()`.
- *   - All fields are null in the inactive branch (no agent_pictures
- *     row → Avatar.vue's initials-fallback fires client-side).
+ *     `palette_key` via `Palette::background()/foreground()`, and a
+ *     missing `variant_key` is **auto-derived** the way the host does —
+ *     see `resolveVariantKey()` below. That last part is load-bearing:
+ *     the shared `Avatar` takes its archetype branch only when
+ *     `variant_key` is a string, so forwarding the raw column (as this
+ *     resolver used to) turned every agent whose
+ *     `agent_pictures.variant_key` is NULL into a pair of initials.
+ *   - An agent with no `agent_pictures` row at all still gets the
+ *     `Slate` palette and a derived variant, so the canvas never goes
+ *     blank because of a missing avatar.
  *
  * Replicating the host's wire-shape here means a single SQL pass
  * covers the whole principal (no N+1 against `agent_pictures` or
- * `media_assets`). Agents with no picture row default to the
- * `Slate` palette so the canvas never goes blank because of a
- * missing avatar — the host's `defaultWireShape()` does the same.
+ * `media_assets`).
  */
 final class NodeResolver
 {
     /**
+     * `variant_key` is still nullable on the type — the `kind === 'image'`
+     * branch sends null, because an uploaded picture replaces the
+     * archetype entirely. On the `kind === 'avatar'` branch it is
+     * always a string; see `resolveVariantKey()`.
+     *
      * @return list<array{
      *     id: int,
      *     name: string,
@@ -134,6 +144,40 @@ final class NodeResolver
 
                 $hasImage = $row->media_asset_id !== null;
 
+                /*
+                 * `variant_key` is *resolved*, never passed through raw.
+                 *
+                 * The host's own `AgentPictureService::avatarWireShape()`
+                 * auto-derives a missing one —
+                 * `$picture->variant_key ?? $this->resolveVariantKey($id)` —
+                 * so `/api/v1/agents` never emits `kind: 'avatar'` with a
+                 * null variant, and the shared `Avatar` (whose archetype
+                 * branch requires `typeof variant_key === 'string'`)
+                 * always takes the archetype tile. This resolver used to
+                 * forward the raw column, so any agent whose
+                 * `agent_pictures.variant_key` was NULL shipped a
+                 * `profile_picture` the host contract says cannot occur and
+                 * the canvas fell through to the package's initials
+                 * branch: "Spora Core Agent" (archetype `analyst`,
+                 * palette `teal`) and "Spora Typst Expert" (archetype
+                 * `writer`, palette `orange`) both rendered as bare "SC"
+                 * / "ST" letters on the node card while the dashboard,
+                 * fed by the same row through the real service, showed
+                 * their glyphs.
+                 *
+                 * The derivation is the host's, re-implemented rather than
+                 * re-invented: FNV-1a over the agent id, modulo the
+                 * variant count, exactly `ProfilePictureService::
+                 * resolveVariantKey()`. Both sides are deterministic, so
+                 * the canvas and the dashboard cannot disagree. Changing
+                 * it means changing the host too — the host documents
+                 * this algorithm as the contract, "the server is the
+                 * source of truth".
+                 */
+                $variantKey = $hasImage || $row->variant_key !== null
+                    ? ($hasImage ? null : (string) $row->variant_key)
+                    : self::resolveVariantKey((int) $row->id);
+
                 return [
                     'id'              => (int) $row->id,
                     'name'            => (string) $row->name,
@@ -148,7 +192,7 @@ final class NodeResolver
                     'profile_picture' => [
                         'kind'             => $hasImage ? 'image' : 'avatar',
                         'archetype'        => $hasImage ? null : ($row->archetype !== null ? (string) $row->archetype : null),
-                        'variant_key'      => $hasImage ? null : ($row->variant_key !== null ? (string) $row->variant_key : null),
+                        'variant_key'      => $variantKey,
                         'palette_key'      => $hasImage ? null : $palette->value,
                         'bg_color'         => $hasImage ? null : $palette->background(),
                         'fg_color'         => $hasImage ? null : $palette->foreground(),
@@ -161,5 +205,37 @@ final class NodeResolver
             },
             $rows,
         );
+    }
+
+    /**
+     * The variant count the host's archetype table has
+     * (`@spora-ai/components → archetypeSvgs`: `v0`, `v1`, `v2`).
+     */
+    private const VARIANT_COUNT = 3;
+
+    /**
+     * Deterministic 3-bucket variant selection, byte-identical to
+     * `Spora\Services\ProfilePictures\ProfilePictureService::resolveVariantKey()`
+     * and its 32-bit FNV-1a helper.
+     *
+     * Duplicated rather than reached for through DI on purpose: the
+     * resolver's whole job is to be a single SQL pass that needs no
+     * service graph, and a wrong variant is a wrong glyph, not a wrong
+     * number. `@see ProfilePictureService::$doc` for the "same algorithm
+     * on both sides" contract this keeps.
+     */
+    private static function resolveVariantKey(int $agentId): string
+    {
+        // The id is stringified *before* it is indexed: `$int[$i]` is not
+        // offset access on an int (PHP warns and yields the first digit),
+        // so hashing `$agentId` directly would hash "1" for every id.
+        $s    = (string) $agentId;
+        $hash = 0x811C9DC5;
+        for ($i = 0, $len = strlen($s); $i < $len; $i++) {
+            $hash ^= ord($s[$i]);
+            $hash = ($hash * 0x01000193) & 0xFFFFFFFF;
+        }
+
+        return 'v' . ($hash % self::VARIANT_COUNT);
     }
 }
