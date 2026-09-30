@@ -6,6 +6,8 @@ namespace Spora\Plugins\TeamGraph\Services;
 
 use DateTimeImmutable;
 use DateTimeInterface;
+use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Models\Principal;
 use Spora\Services\Exceptions\PrincipalNotAccessibleException;
 use Spora\Services\PrincipalService;
 
@@ -42,13 +44,13 @@ final class TeamGraphService
             );
         }
 
-        $principal = \Spora\Models\Principal::query()->find($principalId);
+        $principal = Principal::query()->find($principalId);
         $principalRow = [
             'id'                     => $principalId,
             'type'                   => $principal !== null ? (string) $principal->type : '',
             'name'                   => $this->principalName($principal),
             'is_current_user_owned'  => $principal !== null
-                && $principal->type === \Spora\Models\Principal::TYPE_USER
+                && $principal->type === Principal::TYPE_USER
                 && (int) $principal->user_id === $callerUserId,
         ];
 
@@ -60,18 +62,18 @@ final class TeamGraphService
         ];
     }
 
-    private function principalName(?\Spora\Models\Principal $principal): string
+    private function principalName(?Principal $principal): string
     {
         if ($principal === null) {
             return '';
         }
-        if ($principal->type === \Spora\Models\Principal::TYPE_GROUP && $principal->group_id !== null) {
-            $name = \Illuminate\Database\Capsule\Manager::table('groups')
+        if ($principal->type === Principal::TYPE_GROUP && $principal->group_id !== null) {
+            $name = Capsule::table('groups')
                 ->where('id', $principal->group_id)
                 ->value('name');
             return is_string($name) && $name !== '' ? $name : '';
         }
-        $userRow = \Illuminate\Database\Capsule\Manager::table('users')
+        $userRow = Capsule::table('users')
             ->where('id', $principal->user_id)
             ->select(['username', 'email'])
             ->first();

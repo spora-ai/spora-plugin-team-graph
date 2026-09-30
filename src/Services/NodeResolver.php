@@ -6,27 +6,42 @@ namespace Spora\Plugins\TeamGraph\Services;
 
 use DateTimeInterface;
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Services\AgentPictures\Archetype;
 use Spora\Services\AgentPictures\Palette;
 
 /**
  * One SQL pass over the principal's agents — per-agent `active_chats`,
  * `recent_chats_24h`, and a latest "in flight" status.
  *
- * The active-chats set mirrors the operator dashboard's RUNNING column
- * (RUNNING, AWAITING_SUB_AGENTS, PENDING_APPROVAL); everything else is
- * excluded so finished runs don't inflate the count. The 24h window uses
- * `tasks.created_at` — the schema has no `completed_at` — and the cutoff is
- * bound from PHP so the query needs no engine-specific date arithmetic.
- * Archived agents are dropped here, not in the controller, so every
- * downstream consumer sees the same set.
+ * The in-flight set is the three statuses where the run still belongs to
+ * the agent and the operator can still act on it (RUNNING,
+ * AWAITING_SUB_AGENTS, PENDING_APPROVAL); every terminal status is
+ * excluded so finished runs don't inflate the count. `active_chats` is a
+ * raw per-agent task count, not a conversation count — the dashboard's KPI
+ * chips dedupe by `agent_id` because they answer a different question
+ * ("how many agents look busy?"), while the canvas wants to know how much
+ * load one node carries. The 24h window uses `tasks.created_at` — the
+ * schema has no `completed_at` — and the cutoff is bound from PHP so the
+ * query needs no engine-specific date arithmetic. Archived agents are
+ * dropped here, not in the controller, so every downstream consumer sees
+ * the same set.
  */
 final class NodeResolver
 {
     /**
+     * The host's `AgentPictureService::DEFAULT_ARCHETYPE`, pinned so a
+     * picture row can never leave the canvas without a glyph. See the
+     * `Archetype::tryFrom()` call in `resolveNodes()`.
+     */
+    private const DEFAULT_ARCHETYPE = Archetype::Assistant;
+
+    /**
      * `profile_picture` mirrors the host's `AgentPictureService` wire
      * shape, replicated in the same pass so there is no N+1 against
-     * `agent_pictures` or `media_assets`. `variant_key` is null only on the
-     * `kind === 'image'` branch. See `resolveVariantKey()`.
+     * `agent_pictures` or `media_assets`. `archetype` and `variant_key`
+     * are null only on the `kind === 'image'` branch — on the avatar
+     * branch both are always strings, because the shared `Avatar` takes
+     * its archetype tile only then. See `resolveVariantKey()`.
      *
      * @return list<array{
      *     id: int,
@@ -56,8 +71,6 @@ final class NodeResolver
             SELECT
                 a.id,
                 a.name,
-                NULL AS role,
-                NULL AS picture_url,
                 ap.id AS picture_id,
                 ap.archetype,
                 ap.variant_key,
@@ -70,7 +83,7 @@ final class NodeResolver
                        FROM tasks
                       WHERE agent_id = a.id
                         AND status IN ('RUNNING','AWAITING_SUB_AGENTS','PENDING_APPROVAL')
-                      ORDER BY created_at DESC
+                      ORDER BY created_at DESC, id DESC
                       LIMIT 1),
                     'COMPLETED'
                 ) AS status,
@@ -87,7 +100,6 @@ final class NodeResolver
               LEFT JOIN media_assets ma   ON ma.id = ap.media_asset_id
              WHERE a.principal_id = ?
                AND a.is_archived = 0
-             GROUP BY a.id, ap.id, ma.id
         SQL;
 
         $rows = Capsule::connection()->select($sql, [$cutoff, $principalId]);
@@ -107,6 +119,19 @@ final class NodeResolver
                 $hasImage = $row->media_asset_id !== null;
 
                 /*
+                 * A missing or unrecognised `archetype` becomes the host's
+                 * default rather than a null: the shared `Avatar` takes its
+                 * archetype tile only when `typeof archetype === 'string'`,
+                 * so forwarding the raw column sends every agent without one
+                 * back to initials — the same failure the `variant_key`
+                 * derivation below exists to prevent. Mirrors the host's
+                 * `AgentPictureService::avatarWireShape()`.
+                 */
+                $archetype = $row->archetype !== null
+                    ? Archetype::tryFrom((string) $row->archetype) ?? self::DEFAULT_ARCHETYPE
+                    : self::DEFAULT_ARCHETYPE;
+
+                /*
                  * A missing `variant_key` is *derived*, never forwarded as
                  * null: the host does the same, and the shared `Avatar`
                  * takes its archetype branch only when
@@ -119,17 +144,24 @@ final class NodeResolver
                     : self::resolveVariantKey((int) $row->id);
 
                 return [
-                    'id'              => (int) $row->id,
-                    'name'            => (string) $row->name,
-                    'role'            => $row->role !== null ? (string) $row->role : null,
-                    'picture_url'     => $row->picture_url !== null ? (string) $row->picture_url : null,
+                    'id'   => (int) $row->id,
+                    'name' => (string) $row->name,
+                    /*
+                     * Wire-compat placeholders, not columns: `agents` has
+                     * neither one (000003) and the picture data moved to
+                     * `agent_pictures` in 0062, but the frontend's
+                     * `GraphNode` type still declares both as required
+                     * fields, so they stay on the envelope.
+                     */
+                    'role'            => null,
+                    'picture_url'     => null,
                     // The COALESCE makes the `??` unreachable; defensive only.
                     'status'          => (string) ($row->status ?? 'COMPLETED'),
                     'active_chats'    => (int) $row->active_chats,
                     'recent_chats_24h' => (int) $row->recent_chats_24h,
                     'profile_picture' => [
                         'kind'             => $hasImage ? 'image' : 'avatar',
-                        'archetype'        => $hasImage ? null : ($row->archetype !== null ? (string) $row->archetype : null),
+                        'archetype'        => $hasImage ? null : $archetype->value,
                         'variant_key'      => $variantKey,
                         'palette_key'      => $hasImage ? null : $palette->value,
                         'bg_color'         => $hasImage ? null : $palette->background(),
@@ -159,6 +191,12 @@ final class NodeResolver
      */
     private static function resolveVariantKey(int $agentId): string
     {
+        /*
+         * The id is cast to a string before it is indexed because offset
+         * access on an int is a warning that yields null, and `ord(null)`
+         * is 0 — so hashing the int directly would fold every byte of
+         * every id into 0 and hand every agent the same variant.
+         */
         $s    = (string) $agentId;
         $hash = 0x811C9DC5;
         for ($i = 0, $len = strlen($s); $i < $len; $i++) {

@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\TeamGraph\Services;
 
+use DateTimeImmutable;
+use DateTimeInterface;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use JsonException;
-use Spora\Services\PrincipalContext;
+use Spora\Services\Exceptions\PrincipalNotAccessibleException;
+use Spora\Services\PrincipalService;
 use Spora\Services\ToolConfigServiceInterface;
 use Spora\Tools\SubAgentTool;
 
@@ -18,9 +21,16 @@ use Spora\Tools\SubAgentTool;
  * graph shows the connections the tool would let an agent fire, including
  * configured-but-never-used ones.
  *
- * That list is then enriched with last-24h activity from
- * `tool_calls.proposed_arguments`. The enrichment is best-effort: it never
- * removes a configured edge.
+ * "The same cascade" means the same *call shape*, not the same arguments as
+ * an earlier revision of this class: like the runtime, we pass a user id and
+ * **no** `PrincipalContext`. A context would collapse
+ * `ToolConfigPrincipalCascade::resolvePrincipalIdsWithUserRef()` to the single
+ * principal being graphed, so a group agent would be drawn against a
+ * different allowlist than the one the tool actually enforces.
+ *
+ * That list is then enriched with last-24h activity from executed
+ * `sub_agent` calls recorded in `tool_calls`. The enrichment is
+ * best-effort: it never removes a configured edge.
  *
  * Cross-principal targets are dropped, mirroring
  * `SubAgentTool::sharePrincipal()`, so the visual graph never advertises a
@@ -28,11 +38,30 @@ use Spora\Tools\SubAgentTool;
  */
 final class EdgeResolver
 {
+    /**
+     * `tool_calls.operation` value for the delegating op. `SubAgentTool`
+     * declares a second operation, `handover`, on the same tool — a
+     * materially different relationship (the source chat closes instead of
+     * waiting) that must not be folded into the same aggregate.
+     */
+    private const OPERATION_SUB_AGENT = 'sub_agent';
+
     public function __construct(
         private readonly ToolConfigServiceInterface $toolConfig,
+        /**
+         * Ownership gate for callers that reach this resolver directly.
+         * Required rather than nullable: a defaulted dependency here
+         * would let the gate silently no-op for whoever constructed the
+         * resolver without it, and a security check that can be
+         * switched off by omission is not one. The autowired container
+         * supplies it; tests must pass it too.
+         */
+        private readonly PrincipalService $principals,
     ) {}
 
     /**
+     * @throws PrincipalNotAccessibleException When the caller doesn't control the principal.
+     *
      * @return list<array{
      *     id: string,
      *     source: int,
@@ -45,6 +74,8 @@ final class EdgeResolver
      */
     public function resolveEdges(int $principalId, int $callerUserId): array
     {
+        $this->assertCallerControlsPrincipal($callerUserId, $principalId);
+
         $sourceAgentIds = $this->principalAgentIds($principalId);
         if ($sourceAgentIds === []) {
             return [];
@@ -70,15 +101,32 @@ final class EdgeResolver
                     'id'              => $key,
                     'source'          => $sourceId,
                     'target'          => $targetId,
-                    'op'              => 'sub_agent',
+                    'op'              => $stat === null ? self::OPERATION_SUB_AGENT : $stat['op'],
                     'configured'      => true,
                     'count_24h'       => $stat['count_24h'] ?? 0,
-                    'last_invoked_at' => $stat['last_invoked_at'] ?? null,
+                    'last_invoked_at' => $stat === null
+                        ? null
+                        : (new DateTimeImmutable($stat['last_invoked_at']))->format(DateTimeInterface::ATOM),
                 ];
             }
         }
 
         return $edges;
+    }
+
+    /**
+     * Defence in depth: this class is autowired into the host container, so
+     * any plugin can reach it through `\DI\get()` and would otherwise be
+     * able to read another principal's allowlists. Mirrors the gate
+     * `SubAgentService` and `AgentTargetResolver` apply on the runtime path.
+     */
+    private function assertCallerControlsPrincipal(int $callerUserId, int $principalId): void
+    {
+        if (!$this->principals->callerControlsPrincipal($callerUserId, $principalId)) {
+            throw new PrincipalNotAccessibleException(
+                "Caller {$callerUserId} does not control principal {$principalId}.",
+            );
+        }
     }
 
     /**
@@ -107,17 +155,17 @@ final class EdgeResolver
     {
         $candidateTargetIds = [];
         $allowlists = [];
+        // N+1 by design: `getEffectiveSettings()` is a service call that
+        // walks global → group[0..N] → user-principal → agent override
+        // behind crypto decode and schema normalisation, so batching it
+        // would mean re-implementing that cascade here. ~4 round-trips per
+        // source agent (~800 on a 200-agent principal) is accepted for v1's
+        // single admin-panel GET rather than trading correctness for it.
         foreach ($sourceAgentIds as $sourceId) {
             $settings = $this->toolConfig->getEffectiveSettings(
                 SubAgentTool::class,
                 $sourceId,
                 $callerUserId,
-                new PrincipalContext(
-                    principalId: $principalId,
-                    type: 'principal',
-                    ownerUserId: $callerUserId,
-                    runnerUserId: $callerUserId,
-                ),
             );
             $allowed = $this->coerceToIntList($settings['allowed_target_agents'] ?? []);
             if ($allowed === []) {
@@ -161,12 +209,23 @@ final class EdgeResolver
     }
 
     /**
-     * Best-effort activity per `"source->target"` for every `sub_agent`
-     * invocation whose parent task belongs to the principal. The 7-day
-     * window is the `last_invoked_at` watermark, so a dormant edge keeps a
-     * useful "last seen"; the separate 24h count labels the edge.
+     * Best-effort activity per `"source->target"` for every executed
+     * `sub_agent` invocation whose parent task belongs to the principal.
+     * The 7-day window is the `last_invoked_at` watermark, so a dormant edge
+     * keeps a useful "last seen"; the separate 24h count labels the edge.
      *
-     * @return array<string, array{count_24h: int, last_invoked_at: string}>
+     * Only the `sub_agent` operation counts — a `handover` row on the same
+     * `tool_name` closes the source chat rather than delegating and waiting,
+     * so folding it in would inflate both numbers for an edge that never
+     * happened. `APPROVED` + a stamped `executed_at` is the pair
+     * `ToolCallExecutor` writes once a call leaves the proposal state;
+     * `PENDING_APPROVAL`, `REJECTED` and `DISABLED` rows never get there.
+     *
+     * `last_invoked_at` stays a raw `Y-m-d H:i:s` column value here so the
+     * watermark comparisons below are plain string compares in the same
+     * timezone the rows were written in; the caller formats it as ATOM.
+     *
+     * @return array<string, array{op: string, count_24h: int, last_invoked_at: string}>
      */
     private function resolveRecentActivity(int $principalId): array
     {
@@ -177,15 +236,19 @@ final class EdgeResolver
             <<<'SQL'
                 SELECT
                     tc.created_at         AS created_at,
+                    tc.operation          AS operation,
                     tc.proposed_arguments AS proposed_arguments,
                     t.agent_id            AS parent_agent_id
                   FROM tool_calls tc
                   JOIN tasks t ON t.id = tc.task_id
                  WHERE tc.tool_name = 'sub_agent'
+                   AND tc.operation = ?
+                   AND tc.status = 'APPROVED'
+                   AND tc.executed_at IS NOT NULL
                    AND tc.created_at >= ?
                    AND t.principal_id = ?
             SQL,
-            [$cutoff7d, $principalId],
+            [self::OPERATION_SUB_AGENT, $cutoff7d, $principalId],
         );
 
         $activity = [];
@@ -194,10 +257,17 @@ final class EdgeResolver
             if ($targetId === null) {
                 continue;
             }
-            $key = ((int) $row->parent_agent_id) . '->' . $targetId;
             $createdAt = (string) $row->created_at;
+            if ($createdAt === '') {
+                continue;
+            }
+            $key = ((int) $row->parent_agent_id) . '->' . $targetId;
             if (!isset($activity[$key])) {
-                $activity[$key] = ['count_24h' => 0, 'last_invoked_at' => $createdAt];
+                $activity[$key] = [
+                    'op'              => (string) $row->operation,
+                    'count_24h'       => 0,
+                    'last_invoked_at' => $createdAt,
+                ];
             }
             if ($createdAt > $activity[$key]['last_invoked_at']) {
                 $activity[$key]['last_invoked_at'] = $createdAt;

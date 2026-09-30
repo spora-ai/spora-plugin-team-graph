@@ -35,7 +35,7 @@ function makeGraphController(): array
         ->andReturn(['allowed_target_agents' => []]);
     $service = new TeamGraphService(
         new NodeResolver(),
-        new EdgeResolver($toolConfig),
+        new EdgeResolver($toolConfig, $principals),
         $principals,
     );
     $controller = new TeamGraphController($auth, $service);

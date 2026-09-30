@@ -2,8 +2,12 @@
 
 declare(strict_types=1);
 
+// `routes/` is included because routes/team-graph.php is real PHP on the
+// request surface — it declares TeamGraphRoutes and pins the route path
+// plus its middleware — and phpstan.neon already analyses it. Leaving it
+// out meant the only linted surface stopped before the route table.
 $finder = PhpCsFixer\Finder::create()
-    ->in([__DIR__ . '/src', __DIR__ . '/tests']);
+    ->in([__DIR__ . '/src', __DIR__ . '/tests', __DIR__ . '/routes']);
 
 return (new PhpCsFixer\Config())
     ->setRiskyAllowed(true)

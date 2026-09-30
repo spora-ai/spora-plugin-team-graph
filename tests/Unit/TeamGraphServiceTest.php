@@ -26,7 +26,10 @@ use Spora\Tools\SubAgentTool;
 function makeService(?ToolConfigServiceInterface $toolConfig = null): TeamGraphService
 {
     $principals = new PrincipalService(new PrincipalResolver());
-    $edges      = new EdgeResolver($toolConfig ?? mockToolConfig([]));
+    // The resolver is autowired into the host container, so it carries its
+    // own ownership gate — hand it one here too rather than exercising the
+    // ungated path.
+    $edges      = new EdgeResolver($toolConfig ?? mockToolConfig([]), $principals);
 
     return new TeamGraphService(new NodeResolver(), $edges, $principals);
 }
@@ -105,6 +108,61 @@ function seedAgent(
     }
 }
 
+/**
+ * Seed a `sub_agent` tool call on a completed parent task, in the shape
+ * `ToolCallExecutor` writes it.
+ *
+ * `operation`, `status` and `$executed` are parameters because a
+ * `tool_calls` row is written for *every* call the LLM proposes, and
+ * `SubAgentTool` declares `handover` as a second operation on the same
+ * `tool_name` — so neither the tool name nor the row's existence implies
+ * that a delegation happened.
+ */
+function seedSubAgentCall(
+    int $toolCallId,
+    int $taskId,
+    int $parentAgentId,
+    int $targetAgentId,
+    int $createdAt,
+    string $operation = 'sub_agent',
+    string $status = 'APPROVED',
+    bool $executed = true,
+): void {
+    Capsule::table('tasks')->insert([
+        'id'           => $taskId,
+        'agent_id'     => $parentAgentId,
+        'principal_id' => 42,
+        'status'       => 'COMPLETED',
+        'user_prompt'  => 'spawn',
+        'created_at'   => date('Y-m-d H:i:s', $createdAt - 5),
+        'updated_at'   => date('Y-m-d H:i:s', $createdAt),
+    ]);
+    Capsule::table('tool_calls')->insert([
+        'id'                 => $toolCallId,
+        'task_id'            => $taskId,
+        'agent_id'           => $parentAgentId,
+        'provider_call_id'   => 'p_' . $toolCallId,
+        'tool_name'          => 'sub_agent',
+        'tool_class'         => 'Spora\\Tools\\SubAgentTool',
+        'tool_type'          => 'output',
+        'operation'          => $operation,
+        'status'             => $status,
+        'proposed_arguments' => json_encode(['target_agent_id' => $targetAgentId, 'prompt' => 'p']),
+        'approved_arguments' => json_encode(['target_agent_id' => $targetAgentId, 'prompt' => 'p']),
+        // `APPROVED` + a stamped `executed_at` is what takes a call out of
+        // the proposal state, so one flag drives both.
+        'executed_at'        => $executed ? date('Y-m-d H:i:s', $createdAt) : null,
+        'created_at'         => date('Y-m-d H:i:s', $createdAt),
+        'updated_at'         => date('Y-m-d H:i:s', $createdAt),
+    ]);
+}
+
+/** `last_invoked_at` ships as ATOM, matching `generated_at`. */
+function atomTimestamp(int $unixTime): string
+{
+    return (new DateTimeImmutable(date('Y-m-d H:i:s', $unixTime)))->format(DateTimeInterface::ATOM);
+}
+
 it('builds three nodes with the expected aggregates from three agents', function (): void {
     seedUser(1, 'owner@example.com');
     seedPrincipal(42, 1);
@@ -174,38 +232,11 @@ it('enriches configured edges with last-24h tool_call counts and last_invoked_at
     seedAgent(11, 42); // source
     seedAgent(4, 42);  // target
 
-    // 3 calls from 11 → 4 within the last 24h.
+    // 3 executed sub_agent calls from 11 → 4 within the last 24h.
     $now = time();
-    $calls = [
-        [200, 11, 4,  $now - 60],
-        [201, 11, 4,  $now - 30],
-        [202, 11, 4,  $now - 10],
-    ];
-    foreach ($calls as [$taskId, $parentId, $targetId, $createdAt]) {
-        Capsule::table('tasks')->insert([
-            'id'           => $taskId,
-            'agent_id'     => $parentId,
-            'principal_id' => 42,
-            'status'       => 'COMPLETED',
-            'user_prompt'  => 'spawn',
-            'created_at'   => date('Y-m-d H:i:s', $createdAt - 5),
-            'updated_at'   => date('Y-m-d H:i:s', $createdAt),
-        ]);
-        Capsule::table('tool_calls')->insert([
-            'id'                 => $taskId * 10,
-            'task_id'            => $taskId,
-            'agent_id'           => $parentId,
-            'provider_call_id'   => 'p_' . $taskId,
-            'tool_name'          => 'sub_agent',
-            'tool_class'         => 'Spora\\Tools\\SubAgentTool',
-            'tool_type'          => 'output',
-            'status'             => 'EXECUTED',
-            'proposed_arguments' => json_encode(['target_agent_id' => $targetId, 'prompt' => 'p']),
-            'approved_arguments' => json_encode(['target_agent_id' => $targetId, 'prompt' => 'p']),
-            'created_at'         => date('Y-m-d H:i:s', $createdAt),
-            'updated_at'         => date('Y-m-d H:i:s', $createdAt),
-        ]);
-    }
+    seedSubAgentCall(2000, 200, 11, 4, $now - 60);
+    seedSubAgentCall(2010, 201, 11, 4, $now - 30);
+    seedSubAgentCall(2020, 202, 11, 4, $now - 10);
 
     $service = makeService(mockToolConfig([
         11 => [4],
@@ -215,8 +246,105 @@ it('enriches configured edges with last-24h tool_call counts and last_invoked_at
 
     expect($payload['edges'])->toHaveCount(1)
         ->and($payload['edges'][0]['id'])->toBe('11->4')
+        // `op` is read off the `tool_calls.operation` column rather than
+        // hard-coded, so it tracks the relationship the count describes.
+        ->and($payload['edges'][0]['op'])->toBe('sub_agent')
         ->and($payload['edges'][0]['count_24h'])->toBe(3)
-        ->and($payload['edges'][0]['last_invoked_at'])->toBe(date('Y-m-d H:i:s', $now - 10));
+        ->and($payload['edges'][0]['last_invoked_at'])->toBe(atomTimestamp($now - 10));
+});
+
+it('never counts a handover call, which closes the source chat instead of delegating', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(11, 42); // source
+    seedAgent(4, 42);  // target
+
+    // `SubAgentTool` declares `handover` as a second operation on the same
+    // `sub_agent` tool, so `tool_name` alone cannot tell the two apart. A
+    // handover hands the task over and ends the source chat — a materially
+    // different relationship, not a delegation that waited for a result.
+    seedSubAgentCall(3000, 300, 11, 4, time() - 60, operation: 'handover');
+
+    // Nothing configured, so the handover must not conjure an edge…
+    expect(makeService()->buildGraph(42, 1)['edges'])->toBe([]);
+
+    // …and with the pair configured, it must not inflate the aggregate.
+    $edge = makeService(mockToolConfig([11 => [4]]))->buildGraph(42, 1)['edges'][0];
+
+    expect($edge['configured'])->toBeTrue()
+        ->and($edge['count_24h'])->toBe(0)
+        ->and($edge['last_invoked_at'])->toBeNull();
+});
+
+it('counts only calls that actually executed, not proposals or refusals', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(11, 42); // source
+    seedAgent(4, 42);  // target
+
+    // A row exists for every proposed call regardless of what happened to
+    // it, so without the status filter the count labels edges that never
+    // fired a delegation.
+    $now = time();
+    seedSubAgentCall(4000, 400, 11, 4, $now - 60, status: 'PENDING_APPROVAL', executed: false);
+    seedSubAgentCall(4010, 401, 11, 4, $now - 50, status: 'REJECTED', executed: false);
+    seedSubAgentCall(4020, 402, 11, 4, $now - 40, status: 'DISABLED', executed: false);
+    // The one call that did run, so the count assertion is not vacuous.
+    seedSubAgentCall(4030, 403, 11, 4, $now - 30);
+
+    $edge = makeService(mockToolConfig([11 => [4]]))->buildGraph(42, 1)['edges'][0];
+
+    expect($edge['count_24h'])->toBe(1)
+        ->and($edge['last_invoked_at'])->toBe(atomTimestamp($now - 30));
+});
+
+it('reads the allowlist with the runtime\'s own call shape — a user id and no PrincipalContext', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(11, 42); // source
+    seedAgent(4, 42);  // target
+
+    $toolConfig = M::mock(ToolConfigServiceInterface::class);
+    $toolConfig->shouldReceive('getEffectiveSettings')
+        ->andReturnUsing(static function (...$args): array {
+            // `SubAgentTool::isTargetOnAllowlist()` passes exactly these
+            // three arguments. A fourth `PrincipalContext` would collapse
+            // the group cascade to the principal being graphed, so the
+            // canvas would show edges the tool refuses and hide edges it
+            // permits.
+            expect($args)->toHaveCount(3)
+                ->and($args[0])->toBe(SubAgentTool::class)
+                ->and($args[2])->toBe(1);
+            return ['allowed_target_agents' => $args[1] === 11 ? [4] : []];
+        });
+
+    $principals = new PrincipalService(new PrincipalResolver());
+    $payload    = (new TeamGraphService(
+        new NodeResolver(),
+        new EdgeResolver($toolConfig, $principals),
+        $principals,
+    ))->buildGraph(42, 1);
+
+    // Non-vacuous: the edge that call shape produced is still rendered.
+    expect($payload['edges'])->toHaveCount(1)
+        ->and($payload['edges'][0]['id'])->toBe('11->4');
+});
+
+it('refuses to resolve edges for a principal the caller does not control', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedUser(99, 'foreign@example.com');
+    seedPrincipal(99, 99);
+    seedAgent(11, 42);
+    seedAgent(4, 42);
+
+    // `EdgeResolver` is autowired into the host container, so any plugin
+    // can reach it through `\DI\get()` and bypass the service gate. The
+    // resolver therefore re-asserts the predicate on its own entry point.
+    $resolver = new EdgeResolver(mockToolConfig([11 => [4]]), new PrincipalService(new PrincipalResolver()));
+
+    expect(fn() => $resolver->resolveEdges(99, 1))
+        ->toThrow(PrincipalNotAccessibleException::class);
 });
 
 it('drops cross-principal configured targets (defence-in-depth)', function (): void {
@@ -283,7 +411,8 @@ it('resolves each node\'s profile_picture (full host wire shape) from agent_pict
     // dashboard does. Pinning the strings catches Palette renames.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
         'kind'             => 'avatar',
-        'archetype'        => null,
+        // No archetype on the row — the host's default, never a null.
+        'archetype'        => 'assistant',
         // Derived, never null — `fnv1a(10) % 3`.
         'variant_key'      => 'v0',
         'palette_key'      => 'indigo',
@@ -294,7 +423,7 @@ it('resolves each node\'s profile_picture (full host wire shape) from agent_pict
     ]);
     expect($payload['nodes'][1]['profile_picture'])->toBe([
         'kind'             => 'avatar',
-        'archetype'        => null,
+        'archetype'        => 'assistant',
         // `fnv1a(11) % 3`.
         'variant_key'      => 'v2',
         'palette_key'      => 'amber',
@@ -313,11 +442,11 @@ it('falls back to Slate palette when an agent has no agent_pictures row', functi
     $payload = makeService()->buildGraph(42, 1);
 
     // Mirroring the host's Slate default means the canvas never has a
-    // node without a usable (bg, fg) pair. The host also derives the
-    // variant, so `fnv1a(10) % 3` = v0.
+    // node without a usable (bg, fg) pair. The host also defaults the
+    // archetype and derives the variant, so `fnv1a(10) % 3` = v0.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
         'kind'             => 'avatar',
-        'archetype'        => null,
+        'archetype'        => 'assistant',
         'variant_key'      => 'v0',
         'palette_key'      => 'slate',
         'bg_color'         => '#475569',
@@ -339,7 +468,7 @@ it('falls back to Slate palette when an unknown palette_key is on the row', func
     // it's the default in ProfilePictureService too.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
         'kind'             => 'avatar',
-        'archetype'        => null,
+        'archetype'        => 'assistant',
         // Derived, never null — `fnv1a(10) % 3`.
         'variant_key'      => 'v0',
         'palette_key'      => 'slate',
@@ -348,6 +477,77 @@ it('falls back to Slate palette when an unknown palette_key is on the row', func
         'image_url'        => null,
         'image_updated_at' => null,
     ]);
+});
+
+it('defaults a missing archetype to the host default instead of shipping null', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    // Both picture rows leave `archetype` as SQL NULL: an agent whose row
+    // predates the column's backfill, and one an older release wrote.
+    seedAgent(10, 42, paletteKey: 'indigo');
+    seedAgent(11, 42, paletteKey: 'indigo', variantKey: 'v1');
+
+    $payload = makeService()->buildGraph(42, 1);
+
+    // The shared `Avatar` takes its archetype tile only when
+    // `typeof archetype === 'string'`, so a null here would put these two
+    // nodes back on initials while the dashboard showed glyphs — the same
+    // failure `variant_key` had. `assistant` is
+    // `AgentPictureService::DEFAULT_ARCHETYPE`.
+    foreach ($payload['nodes'] as $node) {
+        expect($node['profile_picture']['archetype'])->toBe('assistant');
+    }
+});
+
+it('falls back to the default archetype when the stored one is not in the enum', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    // An archetype shipped by a newer host than this one knows about.
+    seedAgent(10, 42, paletteKey: 'indigo', archetype: 'archivist');
+
+    $payload = makeService()->buildGraph(42, 1);
+
+    // Same drift tolerance the palette gets, and the same host default.
+    expect($payload['nodes'][0]['profile_picture']['archetype'])->toBe('assistant');
+});
+
+it('keeps an operator-chosen archetype untouched', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(11, 42, paletteKey: 'violet', archetype: 'creative', variantKey: 'v2');
+
+    $payload = makeService()->buildGraph(42, 1);
+
+    expect($payload['nodes'][0]['profile_picture']['archetype'])->toBe('creative');
+});
+
+it('breaks a created_at tie on task id so the status is deterministic', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(10, 42);
+
+    // `tasks.created_at` is second-precision, so two runs started in the
+    // same second tie — and `LIMIT 1` then picks whichever row the engine
+    // hands back first. The higher id is the newer run, so it wins.
+    $createdAt = date('Y-m-d H:i:s');
+    foreach ([[300, 'RUNNING'], [301, 'PENDING_APPROVAL']] as [$taskId, $status]) {
+        Capsule::table('tasks')->insert([
+            'id'           => $taskId,
+            'agent_id'     => 10,
+            'principal_id' => 42,
+            'status'       => $status,
+            'user_prompt'  => 'hi',
+            'created_at'   => $createdAt,
+            'updated_at'   => $createdAt,
+        ]);
+    }
+
+    $node = makeService()->buildGraph(42, 1)['nodes'][0];
+
+    expect($node['status'])->toBe('PENDING_APPROVAL')
+        // The count is not a tie-break away from the truth: both rows are
+        // in flight, so the node is carrying two.
+        ->and($node['active_chats'])->toBe(2);
 });
 
 it('derives a missing variant_key instead of shipping null on the avatar branch', function (): void {
