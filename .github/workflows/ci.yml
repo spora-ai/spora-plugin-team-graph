@@ -103,6 +103,9 @@ jobs:
         run: composer install --no-interaction --prefer-dist
 
       - name: Generate clover coverage report
+        # The source filter lives in phpunit.xml's `<source>` block, not on
+        # the command line, so a local `pest --coverage` measures the same
+        # set the gate does.
         run: ./vendor/bin/pest --coverage-clover=coverage.xml
 
       - name: Upload coverage.xml

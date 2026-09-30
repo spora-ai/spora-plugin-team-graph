@@ -13,4 +13,21 @@
             <directory suffix="Test.php">./tests/Feature</directory>
         </testsuite>
     </testsuites>
+    <!--
+        Without this block PHPUnit has no filter and skips coverage
+        entirely: it logs "No filter is configured, code coverage will
+        not be processed", writes no clover report, and still exits 0 —
+        so the coverage job would upload nothing and Sonar would ingest
+        no data while both looked green.
+
+        `routes` is a source directory, not a test one: team-graph.php
+        declares the route path and its middleware on the request
+        surface, and phpstan.neon already analyses it.
+    -->
+    <source>
+        <include>
+            <directory>src</directory>
+            <directory>routes</directory>
+        </include>
+    </source>
 </phpunit>
