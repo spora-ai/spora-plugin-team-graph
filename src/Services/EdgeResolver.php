@@ -313,6 +313,12 @@ final class EdgeResolver
      * integer string. Mirroring the order matters — the parenthesised
      * form must win over the bare-hash form, and a name like
      * "Agent #3" only parses under the first.
+     *
+     * The label string is the *production* shape, not a legacy edge case:
+     * `SubAgentTool`'s `target_agent` schema parameter is the resolved
+     * "Name (#id)" `enum` label, so the LLM's `proposed_arguments` carry
+     * that string. The `is_int` branch above only ever fires for rows
+     * written by older callers and for the tests' own fixtures.
      */
     private function extractTargetAgentId(mixed $raw): ?int
     {
@@ -338,13 +344,14 @@ final class EdgeResolver
      * bare "#3" prefixed by a name ("Research Agent (#3)"), and the bare
      * form is anchored so it cannot match a name that merely ends in a
      * digit. Order and anchoring both come from
-     * `SubAgentTool::resolveTargetAgentId()`.
+     * `SubAgentTool::resolveTargetAgentId()`, which also casts its capture
+     * to `int` — the capture is a string, and the caller declares `?int`.
      */
-    private static function digitsFromName(string $value): ?string
+    private static function digitsFromName(string $value): ?int
     {
         foreach (['/.*\(#(\d+)\)\s*$/', '/^#(\d+)\s*$/'] as $pattern) {
             if (preg_match($pattern, $value, $m) === 1) {
-                return $m[1];
+                return (int) $m[1];
             }
         }
 

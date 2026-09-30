@@ -8,6 +8,27 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 Nothing yet.
 
+## [0.1.3] — 2026-09-30
+
+### Fixed
+
+- **`500 INTERNAL_SERVER_ERROR` on any graph with a recorded delegation.**
+  `EdgeResolver::extractTargetAgentId()` declares `: ?int` but returned the
+  raw regex capture from `digitsFromName()`, which was typed `?string` — so
+  the `"Research Agent (#3)"` label form raised
+  `TypeError: … Return value must be of type ?int, string returned` and the
+  whole graph endpoint 500'd. The helper now casts its capture to `int`,
+  matching `SubAgentTool::resolveTargetAgentId()`, which does the same on
+  the runtime path.
+
+  This was the *production* shape, not an edge case: `SubAgentTool`'s
+  `target_agent` parameter is the resolved `"Name (#id)"` `enum` label, so
+  the LLM's `proposed_arguments` always carry that string. The int branch
+  only ever fired for older callers and the tests' own fixtures, which is
+  how a `?string` → `?int` slip shipped without a single test touching it.
+  All three accepted string forms (parenthesised, bare `#id`, plain digit
+  string) are now pinned by a test, along with the unparseable-label skip.
+
 ## [0.1.2] — 2026-09-30
 
 ### Fixed
@@ -56,7 +77,8 @@ group read.
 - `TeamGraphApp` — the `/apps/team-graph` admin entry (Mermaid 10
   rendering, node cards as a Vue overlay).
 
-[Unreleased]: https://github.com/spora-ai/spora-plugin-team-graph/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/spora-ai/spora-plugin-team-graph/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/spora-ai/spora-plugin-team-graph/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/spora-ai/spora-plugin-team-graph/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/spora-ai/spora-plugin-team-graph/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/spora-ai/spora-plugin-team-graph/releases/tag/v0.1.0

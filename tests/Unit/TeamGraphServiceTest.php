@@ -155,12 +155,17 @@ function seedAgent(
  * `SubAgentTool` declares `handover` as a second operation on the same
  * `tool_name` — so neither the tool name nor the row's existence implies
  * that a delegation happened.
+ *
+ * `$targetAgentId` is `int|string` because the production wire shape is
+ * the *label*: `SubAgentTool`'s `target_agent` parameter is the resolved
+ * "Name (#id)" `enum` label, so the LLM's `proposed_arguments` carry a
+ * string. The int form only shows up in older callers and fixtures.
  */
 function seedSubAgentCall(
     int $toolCallId,
     int $taskId,
     int $parentAgentId,
-    int $targetAgentId,
+    int|string $targetAgentId,
     int $createdAt,
     string $operation = 'sub_agent',
     string $status = 'APPROVED',
@@ -287,6 +292,36 @@ it('enriches configured edges with last-24h tool_call counts and last_invoked_at
         // `op` is read off the `tool_calls.operation` column rather than
         // hard-coded, so it tracks the relationship the count describes.
         ->and($payload['edges'][0]['op'])->toBe('sub_agent')
+        ->and($payload['edges'][0]['count_24h'])->toBe(3)
+        ->and($payload['edges'][0]['last_invoked_at'])->toBe(atomTimestamp($now - 10));
+});
+
+it('resolves the target id from the label string the LLM actually sends', function (): void {
+    seedUser(1, 'o@example.com');
+    seedPrincipal(42, 1);
+    seedAgent(11, 42); // source
+    seedAgent(4, 42);  // target
+
+    // The three string forms `SubAgentTool::resolveTargetAgentId()` accepts,
+    // in the order it tries them. The parenthesised form must win over the
+    // bare-hash form, and "Agent #4" only parses under the first pattern —
+    // the reason the order is load-bearing.
+    $now = time();
+    seedSubAgentCall(3000, 300, 11, 'Research Agent (#4)', $now - 60);
+    seedSubAgentCall(3010, 301, 11, '#4', $now - 30);
+    seedSubAgentCall(3020, 302, 11, '4', $now - 10);
+    // No id in the label → the row cannot be attributed to an edge and is
+    // skipped rather than attributed to agent 0.
+    seedSubAgentCall(3030, 303, 11, 'Research Agent', $now - 5);
+
+    $service = makeService(mockToolConfig([
+        11 => [4],
+    ]));
+
+    $payload = $service->buildGraph(42, 1);
+
+    expect($payload['edges'])->toHaveCount(1)
+        ->and($payload['edges'][0]['id'])->toBe('11->4')
         ->and($payload['edges'][0]['count_24h'])->toBe(3)
         ->and($payload['edges'][0]['last_invoked_at'])->toBe(atomTimestamp($now - 10));
 });
