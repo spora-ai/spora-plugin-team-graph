@@ -115,7 +115,6 @@ final class NodeResolver
      * which are the part worth reading — are not buried under the SQL
      * that feeds them.
      *
-     * @param  object $row
      * @return array<string, mixed>
      */
     private static function nodeFromRow(object $row): array

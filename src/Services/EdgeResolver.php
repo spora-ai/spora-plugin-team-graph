@@ -310,7 +310,7 @@ final class EdgeResolver
      * form must win over the bare-hash form, and a name like
      * "Agent #3" only parses under the first.
      */
-    private function extractTargetAgentId(mixed $raw): ?int // NOSONAR php:S1142 — each early return corresponds to one of the shapes SubAgentTool::resolveTargetAgentId() recognises (int, parenthesised name, bare #id, digit string); fusing them would obscure that this mirrors a host parser
+    private function extractTargetAgentId(mixed $raw): ?int
     {
         $decoded = $this->decodeJson($raw);
         $value = is_array($decoded) ? ($decoded['target_agent_id'] ?? null) : null;
@@ -340,7 +340,7 @@ final class EdgeResolver
      *
      * @return mixed
      */
-    private function decodeJson(mixed $raw)
+    private function decodeJson(mixed $raw) // NOSONAR php:S1142 — three returns for three input shapes (already an array / not a string / unparseable), where the unparseable case is a catch rather than a branch and cannot be folded into the guard
     {
         if (is_array($raw)) {
             return $raw;
