@@ -1,84 +1,107 @@
-# Spora Plugin Skeleton
+# spora-plugin-team-graph
 
-Skeleton for a [Spora](https://github.com/spora-ai/spora-core) plugin.
+A per-principal directed graph of agent spawning relationships for
+[Spora](https://github.com/spora-ai/spora-core). The endpoint
+`GET /api/v1/plugins/team-graph/graph?principal_id=<id>` returns the
+principal's agents (nodes) and the `sub_agent` connections between them
+(edges); the admin SPA renders the edges as a Mermaid 10 flowchart and
+overlays the node cards as real DOM at `/apps/team-graph`.
 
-Use this repository as a template for any new `spora-plugin`:
+Read-only in v1 — no LLM-callable tools, no migrations, no agent
+templates.
 
-1. Click **Use this template** → **Create a new repository** on GitHub.
-2. Rename the package in `composer.json` (e.g. `spora-ai/spora-plugin-tavily`).
-3. Rename the namespace (`Spora\Plugins\Skeleton` → `Spora\Plugins\<YourPlugin>`)
-   in every PHP file.
-4. Update `plugin.json`'s `slug`, `description`, `class`, and `icon`.
-5. Replace `src/Tools/EchoTool.php` with your real tool(s); add more files
-   under `src/Tools/` and list them in `src/SkeletonPlugin.php::tools()`.
-6. If your plugin needs database tables, add Laravel migrations under
-   `database/migrations/` and bump `SkeletonPlugin::schemaVersion()`.
+## Install
 
-## Authoring guidelines
-
-Framework-level conventions — which classes are plugin-stable, what's
-framework-internal, schema versioning, deprecation policy — live in the
-[Spora docs → Plugin system](https://docs.spora-ai.com/reference/concepts/plugins-system).
-The driver / history value-object layer is **framework-internal**:
-route plugin logic through `AgentOrchestrator` and `TaskService`.
-
-> **Skills feature note.** The skeleton's `skillPaths()` override
-> requires `spora-core ≥ 0.12.0` at runtime (the `skillPaths()` hook
-> was added in v0.12). Older spora-core versions will throw a fatal
-> when the loader fails to resolve the missing method. The skeleton's
-> `composer.json` still requires `>=0.3.0 <1.0.0` for compatibility
-> with existing installations; plugin authors using the Skills
-> feature should pin to `^0.12`.
-
-## Layout
-
-```
-.
-├── composer.json          # name=spora-ai/spora-plugin-<x>, type=spora-plugin
-├── plugin.json            # manifest the PluginLoader reads at boot
-├── src/
-│   ├── SkeletonPlugin.php # PluginInterface implementation (FQCN matches plugin.json `class`)
-│   └── Tools/
-│       └── EchoTool.php   # one tool per file (replace this one)
-├── skills/                # skills shipped with the plugin (one folder per skill)
-├── agent-templates/       # agent-template files shipped with the plugin
-├── tests/                 # Pest unit tests
-│   ├── Pest.php
-│   └── Unit/
-└── .github/workflows/
-    └── ci.yml             # pest + phpstan + cs-fixer
+```sh
+composer require spora-ai/spora-plugin-team-graph
+composer require spora-ai/spora-plugin-team-graph-frontend
 ```
 
-`skills/` and `agent-templates/` are present in the template (with
-`.gitkeep`) so the directory references in `SkeletonPlugin::skillPaths()`
-and `SkeletonPlugin::agentTemplatePaths()` resolve out of the box.
-Plugin authors can leave them empty if the plugin ships none, or delete
-the methods in `SkeletonPlugin.php` to drop the hook entirely.
+Two packages, as for any plugin with an operator-facing panel. This PHP
+package does **not** `require` the frontend half, so the app must require
+`spora-ai/spora-plugin-team-graph-frontend` itself — the explicit command
+above is a no-op if the dependency is ever pulled in transitively. The
+frontend package (`type: spora-plugin-frontend`) is what the
+`SporaPluginFrontendInstaller` drops into `public/plugins/team-graph/`;
+without it the app entry appears but the panel 404s on the bundle.
 
-## Local development
+## Open it
 
-Clone the repo, install dependencies, and run the tests:
+After `composer install` (which triggers the installer's first-run
+migration) and the regular `bin/spora spora:install` step, the
+`Team Graph` entry appears under the admin panel's sidebar. It
+serves from `/apps/team-graph`.
 
-```bash
-composer install
-./vendor/bin/pest
+## Architecture
+
+* `src/TeamGraphPlugin.php` — entry point; wires DI bindings
+  (`TeamGraphService`, `NodeResolver`, `EdgeResolver`,
+  `TeamGraphController`, plus the `ToolConfigServiceInterface` alias PHP-DI
+  cannot infer) via `ContainerBuildingEvent` and registers the single GET
+  route via `RoutesRegisteringEvent`.
+* `routes/team-graph.php` — the route path and its middleware
+  (`AuthMiddleware`, `CsrfMiddleware`) in one place, loaded through
+  Composer's `autoload.files` because it sits outside PSR-4's `src/`.
+* `src/TeamGraphApp.php` — admin-panel metadata
+  (`VueAppInterface`).
+* `src/Http/TeamGraphController.php` — `GET …/graph?principal_id=…`
+  → `data` envelope; 401 / 403 / 422 mapping.
+* `src/Services/TeamGraphService.php` — principal gate + envelope
+  assembly.
+* `src/Services/NodeResolver.php` — agent aggregation in one SQL
+  pass (active chats, 24h recent, latest in-flight status, and the
+  `AgentPictureService` wire shape resolved inline so there is no N+1
+  against `agent_pictures` / `media_assets`).
+* `src/Services/EdgeResolver.php` — one edge per `(source, target)` pair in
+  each source agent's **configured** `allowed_target_agents` allowlist for
+  `SubAgentTool`, read through the same
+  `ToolConfigServiceInterface::getEffectiveSettings()` cascade the tool
+  checks at runtime. So the graph shows connections that are configured but
+  have never fired, and drops cross-principal targets the way
+  `SubAgentTool::sharePrincipal()` would. `sub_agent` `tool_calls` are read
+  only to enrich those edges with `count_24h` (24h window) and
+  `last_invoked_at` (7d window) — never to add or remove one.
+
+## Frontend contract
+
+The host SPA loads the bundle from
+`/plugins/team-graph/main.js` (`TeamGraphApp::entry()`), which must be the
+frontend package's `build.lib.fileName()`. The bundle installs a
+mount/unmount contract on `window.SporaAppTeamGraph`:
+
+```ts
+window.SporaAppTeamGraph = {
+    mount: (target: HTMLElement, hostContext: PluginHostContext) => void | Promise<void>,
+    unmount: (target: HTMLElement) => void,
+}
 ```
 
-## Publishing
+`hostContext` carries the host's `api`, `pinia`, `theme`, `route` and
+`router`; the plugin installs its own Pinia for plugin-local state and
+branches the host client in through `src/api/client.ts`.
 
-1. Tag the release: `git tag v0.1.0 && git push --tags`.
-2. (Optional) Configure Packagist to auto-pull from the GitHub repo.
+## Tests
 
-There's nothing to bump in `plugin.json` or `composer.json` — the runtime reads the version from the git tag via `Composer\InstalledVersions::getPrettyVersion()`, so the tag is the single source of truth.
+```sh
+composer test:parallel
+```
 
-## CI
+The suite covers:
 
-Three parallel jobs run on every push to `main`, on `v*` tags, and on
-pull requests:
+* `TeamGraphServiceTest` — drives the service, both resolvers and the
+  envelope against the same in-memory SQLite the feature suite uses, with
+  only `ToolConfigServiceInterface` mocked so each scenario can script its
+  own allowlist. Areas: node aggregates and status, configured-vs-observed
+  edge emission, `tool_calls` enrichment, cross-principal and archived
+  filtering, `profile_picture` wire shape (palette fallback, `variant_key`
+  derivation), and the principal-access refusal.
+* `TeamGraphControllerTest` — feature tests against an in-memory SQLite
+  (auth gate, principal control, validation).
+* `TeamGraphPluginTest` — wiring: event subscriptions, the DI bindings, the
+  registered route with its middleware, and the app's `VueAppInterface`
+  contract.
 
-- `test` — Pest on PHP 8.4 + 8.5
-- `static-analysis` — PHPStan level 5
-- `code-style` — php-cs-fixer dry-run (same ruleset as Spora core)
+## Plan
 
-External actions are pinned to full commit SHAs per the project's supply-chain
-policy.
+See `spora-workspace/plans/spora-plugin-team-graph.md` for the full
+design context, including the prototype set and the risk register.
