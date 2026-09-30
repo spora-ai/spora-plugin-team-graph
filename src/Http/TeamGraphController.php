@@ -16,14 +16,11 @@ use Symfony\Component\HttpFoundation\Response;
  *
  *   GET /api/v1/plugins/team-graph/graph?principal_id=<id>
  *
- * Auth: `AuthMiddleware` + `CsrfMiddleware` (registered in
- * {@see \Spora\Plugins\TeamGraph\TeamGraphPlugin::onRoutesRegistering()}).
- * CSRF is a no-op on GET, so the middleware chain effectively enforces
- * "logged-in caller" only on this endpoint.
- *
- * The principal-id gate happens inside {@see TeamGraphService::buildGraph()}
- * via {@see PrincipalService::callerControlsPrincipal()}; the controller
- * surfaces a 403 envelope when the service refuses.
+ * The principal-id gate is enforced in
+ * {@see TeamGraphService::buildGraph()} via
+ * `PrincipalService::callerControlsPrincipal()`; this controller surfaces
+ * the 403 envelope when the service refuses. `CsrfMiddleware` is a no-op on
+ * GET, so the chain effectively enforces "logged-in caller" only.
  */
 final class TeamGraphController
 {

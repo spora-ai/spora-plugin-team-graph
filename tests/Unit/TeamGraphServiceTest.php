@@ -14,17 +14,13 @@ use Spora\Services\ToolConfigServiceInterface;
 use Spora\Tools\SubAgentTool;
 
 /**
- * Integration coverage for {@see TeamGraphService}. The resolvers
- * are `final` (framework rule), so they cannot be mocked; the tests
- * drive the service against the same in-memory SQLite the feature
- * suite uses, seeded with the rows each scenario needs. The service's
- * real job — principal gate + envelope assembly — is exercised by
- * every test.
+ * Integration coverage for {@see TeamGraphService}. The resolvers are
+ * `final`, so they cannot be mocked; the tests drive the service
+ * against the same in-memory SQLite the feature suite uses, seeded with
+ * the rows each scenario needs.
  *
- * EdgeResolver depends on {@see ToolConfigServiceInterface}, which is
- * mocked so each scenario can script its own `allowed_target_agents`
- * per agent. The mock only needs `getEffectiveSettings(SubAgentTool,
- * $agentId, …)` — every other call returns a no-op default.
+ * `ToolConfigServiceInterface` is mocked so each scenario can script its
+ * own `allowed_target_agents` per agent.
  */
 
 function makeService(?ToolConfigServiceInterface $toolConfig = null): TeamGraphService
@@ -232,10 +228,9 @@ it('drops cross-principal configured targets (defence-in-depth)', function (): v
     seedAgent(4, 99);             // target in foreign principal 99
     seedAgent(7, 42);             // target in same principal
 
-    // The source agent's allowlist incorrectly references a foreign
-    // agent (4) — a stale override or a drift after a principal
-    // transfer. The runtime would refuse to fire this edge; the
-    // team-graph view must hide it too.
+    // The source agent's allowlist references a foreign agent (4) — a
+    // stale override or drift after a principal transfer. The runtime
+    // would refuse to fire it, so the graph must hide it too.
     $service = makeService(mockToolConfig([
         11 => [4, 7],
     ]));
@@ -283,16 +278,13 @@ it('resolves each node\'s profile_picture (full host wire shape) from agent_pict
     $payload = makeService()->buildGraph(42, 1);
 
     expect($payload['nodes'])->toHaveCount(2);
-    // The full wire shape mirrors the host's
-    // `ProfilePictureService::pictureToWire()` output so the canvas
-    // can render the same `Avatar.vue` shape (image / archetype /
-    // initials) the dashboard does. Pinning the exact strings here
-    // catches Palette renames + archetype enum drift.
+    // The full wire shape mirrors the host's `ProfilePictureService`
+    // output so the canvas renders the same `Avatar.vue` shape the
+    // dashboard does. Pinning the strings catches Palette renames.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
         'kind'             => 'avatar',
         'archetype'        => null,
-        // Derived, never null — see the derivation tests below.
-        // `fnv1a(10) % 3`.
+        // Derived, never null — `fnv1a(10) % 3`.
         'variant_key'      => 'v0',
         'palette_key'      => 'indigo',
         'bg_color'         => '#4338CA',
@@ -320,13 +312,9 @@ it('falls back to Slate palette when an agent has no agent_pictures row', functi
 
     $payload = makeService()->buildGraph(42, 1);
 
-    // ProfilePictureService::defaultWireShape() uses Slate when no
-    // row exists; we mirror that default so the canvas never has
-    // a node without a usable (bg, fg) pair. The kind stays
-    // 'avatar' (it's not 'image') and the colour fields are
-    // populated so Avatar.vue's archetype-fallback can render the
-    // agent tile instead of falling through to initials. The host's
-    // default also *derives* the variant, so `fnv1a(10) % 3` = v0.
+    // Mirroring the host's Slate default means the canvas never has a
+    // node without a usable (bg, fg) pair. The host also derives the
+    // variant, so `fnv1a(10) % 3` = v0.
     expect($payload['nodes'][0]['profile_picture'])->toBe([
         'kind'             => 'avatar',
         'archetype'        => null,
@@ -365,8 +353,8 @@ it('falls back to Slate palette when an unknown palette_key is on the row', func
 it('derives a missing variant_key instead of shipping null on the avatar branch', function (): void {
     seedUser(1, 'o@example.com');
     seedPrincipal(42, 1);
-    // The two shapes the bug was reported on: an archetype is configured,
-    // a variant is not. `agent_pictures.variant_key` is SQL NULL for both.
+    // The reported shape: an archetype is configured, a variant is not,
+    // so `agent_pictures.variant_key` is SQL NULL for both.
     seedAgent(9, 42, paletteKey: 'teal', archetype: 'analyst');
     seedAgent(10, 42, paletteKey: 'orange', archetype: 'writer');
 
@@ -376,10 +364,9 @@ it('derives a missing variant_key instead of shipping null on the avatar branch'
         $picture = $node['profile_picture'];
         expect($picture['kind'])->toBe('avatar');
         expect($picture['archetype'])->not->toBeNull();
-        // The regression: null here makes the shared `Avatar` fail its
-        // `typeof variant_key === 'string'` guard and fall through to the
-        // initials branch, so the card showed "SC" / "ST" instead of the
-        // agent's glyph while the dashboard showed the glyph.
+        // A null here fails the shared `Avatar`'s
+        // `typeof variant_key === 'string'` guard, dropping the card to
+        // initials while the dashboard showed the glyph.
         expect($picture['variant_key'])->toBeString();
         expect($picture['variant_key'])->toMatch('/^v[0-2]$/');
     }

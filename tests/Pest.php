@@ -7,11 +7,8 @@ declare(strict_types=1);
 | Pest Bootstrap
 |--------------------------------------------------------------------------
 |
-| Plugin-local test helpers and global Pest hooks. Mirrors the
-| `spora-plugin-memories` / `spora-plugin-typst` pattern: define
-| BASE_PATH, hand-roll a `uses(...)` block that installs the full core
-| migration set into a per-process in-memory SQLite and rolls back
-| each test in afterEach for isolation.
+| Plugin-local test helpers and global Pest hooks: a fresh in-memory
+| SQLite per test, rolled back in afterEach.
 |
 */
 

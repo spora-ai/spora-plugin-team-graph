@@ -16,12 +16,9 @@ use Spora\Plugins\TeamGraph\TeamGraphPlugin;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 
 /**
- * Wiring tests for {@see TeamGraphPlugin}. The plugin's role is to
- * bind the team-graph stack into the host's container + route table;
- * the heavier controller / service behaviour lives in the Feature +
- * Unit suites. CSRF + Auth middleware attachment is verified here by
- * inspecting the route entry that {@see RoutesRegisteringEvent}
- * records — the same shape typst + memories use.
+ * Wiring tests for {@see TeamGraphPlugin}: the plugin's role is to bind
+ * the team-graph stack into the host's container + route table, so the
+ * heavier controller / service behaviour lives in the other suites.
  */
 beforeEach(function () {
     $this->plugin     = new TeamGraphPlugin();

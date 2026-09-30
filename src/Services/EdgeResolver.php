@@ -11,36 +11,20 @@ use Spora\Services\ToolConfigServiceInterface;
 use Spora\Tools\SubAgentTool;
 
 /**
- * Edges are derived from each source agent's *configured*
- * `allowed_target_agents` list — the same list that
- * {@see SubAgentTool::isTargetOnAllowlist()} checks at runtime, so the
- * graph shows exactly the connections the tool would let an agent fire.
+ * Edges come from each source agent's *configured* `allowed_target_agents`
+ * list — the same list {@see SubAgentTool::isTargetOnAllowlist()} checks at
+ * runtime, read through the same
+ * {@see ToolConfigServiceInterface::getEffectiveSettings()} cascade. So the
+ * graph shows the connections the tool would let an agent fire, including
+ * configured-but-never-used ones.
  *
- * The configured graph is then enriched with last-24h activity from
- * `tool_calls.proposed_arguments` so the operator can see *which*
- * configured edges are actually being used today (vs. just sitting on
- * the allowlist). The historical enrichment is best-effort — the
- * configured edge always shows up even if `tool_calls` returns nothing,
- * so unconfigured-and-never-used connections still appear.
+ * That list is then enriched with last-24h activity from
+ * `tool_calls.proposed_arguments`. The enrichment is best-effort: it never
+ * removes a configured edge.
  *
- *   - **Source** = `agent_tool_overrides.settings` (encrypted JSON) for
- *     the source agent, read via the same
- *     {@see ToolConfigServiceInterface::getEffectiveSettings()} cascade
- *     the runtime uses (defaults → global → group cascade → user
- *     principal → agent override). Schema defaults (an empty list) are
- *     applied last, matching `SubAgentTool`'s `required: true` contract.
- *
- *   - **Intra-principal invariant** — the runtime rejects any
- *     configured target in a different principal via
- *     `SubAgentTool::sharePrincipal()`. We apply the same filter here
- *     so the visual graph never advertises a connection that would be
- *     refused at execution time.
- *
- *   - **Historical enrichment** — a single SQL pass over
- *     `tool_calls` (last 7 days, `tool_name = 'sub_agent'`) builds a
- *     `(parent_agent_id, target_agent_id) → {count_24h, last_invoked_at}`
- *     map. This is folded into the configured edge list so the canvas
- *     can label edges with recent activity without an N+1 query.
+ * Cross-principal targets are dropped, mirroring
+ * `SubAgentTool::sharePrincipal()`, so the visual graph never advertises a
+ * connection that would be refused at execution time.
  */
 final class EdgeResolver
 {
@@ -112,16 +96,9 @@ final class EdgeResolver
     }
 
     /**
-     * For each source agent in the principal, read its effective
-     * `allowed_target_agents` list and keep only targets that (a) are
-     * non-archived and (b) live in the same principal as the source.
-     *
-     * The host's `ToolConfigService` cascade is principal-agnostic by
-     * design (it returns the merged settings from defaults → global →
-     * group cascade → user principal → agent override), so the
-     * intra-principal filter is what keeps the team-graph view
-     * consistent with what `SubAgentTool::execute()` would let through
-     * at runtime.
+     * Keep only targets that are non-archived and share the source's
+     * principal, so the rendered set matches what `SubAgentTool` would let
+     * through.
      *
      * @param  list<int> $sourceAgentIds
      * @return array<int, list<int>>
@@ -184,15 +161,10 @@ final class EdgeResolver
     }
 
     /**
-     * Best-effort 24h activity for every `sub_agent` invocation whose
-     * parent task belongs to the principal. Returns a per-pair aggregate
-     * keyed `"source->target"` so the caller can fold it onto the
-     * configured-edge list in O(1).
-     *
-     * Uses a 7-day window for the `last_invoked_at` watermark (so
-     * recently-touched edges retain a useful "last seen" timestamp even
-     * when they fell off the 24h count) and a separate 24h count to
-     * label the edge on the canvas.
+     * Best-effort activity per `"source->target"` for every `sub_agent`
+     * invocation whose parent task belongs to the principal. The 7-day
+     * window is the `last_invoked_at` watermark, so a dormant edge keeps a
+     * useful "last seen"; the separate 24h count labels the edge.
      *
      * @return array<string, array{count_24h: int, last_invoked_at: string}>
      */

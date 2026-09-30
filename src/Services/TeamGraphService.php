@@ -13,16 +13,8 @@ use Spora\Services\PrincipalService;
  * Glue between the controller, the two resolvers, and the
  * {@see PrincipalService} access gate.
  *
- * The service-level `buildGraph()` is the single point that
- *   1. verifies the caller controls the requested principal
- *      (`PrincipalService::callerControlsPrincipal`),
- *   2. fetches the principal summary for the response envelope,
- *   3. folds nodes + edges from the resolvers into the payload.
- *
- * Splitting the read from the principal check keeps the controller
- * thin and the test surface narrow: a unit test against
- * {@see TeamGraphService} only needs to mock the resolvers +
- * {@see PrincipalService}; an integration test exercises the SQL.
+ * The principal check lives here rather than in the controller so the gate
+ * is exercised by every path that can build a graph.
  */
 final class TeamGraphService
 {

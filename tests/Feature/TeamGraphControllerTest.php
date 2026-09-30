@@ -16,14 +16,9 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Feature coverage for {@see TeamGraphController}.
  *
- * The CSRF middleware chain is exercised at the plugin level in
- * {@see Tests\Unit\TeamGraphPluginTest} (it inspects the registered
- * route's middleware array via reflection on the FastRoute
- * data-generator). Here we exercise the controller's HTTP envelope:
- *   - GET with a controlled principal → 200 + the data envelope,
- *   - GET with an uncontrolled principal → 403,
- *   - GET without an authenticated session → 401 (the controller
- *     short-circuits before the service is even called).
+ * CSRF + Auth middleware attachment is asserted at the plugin level in
+ * {@see Tests\Unit\TeamGraphPluginTest}; here we exercise the HTTP
+ * envelope: 200 + data, 403, 401, 422.
  *
  * The fixture graph is empty (no agents, no edges) — the controller
  * envelope is what these tests pin, not the resolvers' behaviour.

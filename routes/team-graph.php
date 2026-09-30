@@ -3,20 +3,9 @@
 declare(strict_types=1);
 
 /*
- * Route definition for spora-plugin-team-graph.
- *
- * Loaded via Composer's `autoload.files` so the `TeamGraphRoutes`
- * class is available everywhere (production + tests) without
- * relying on PSR-4 path mapping (the file lives in `routes/` by
- * convention, not in `src/`).
- *
- * The plugin's entry point subscribes to `RoutesRegisteringEvent`
- * and reads these constants to register the single
- * `GET /api/v1/plugins/team-graph/graph` endpoint behind
- * `AuthMiddleware` + `CsrfMiddleware`. Centralising the path +
- * middleware list in this file keeps the route surface discoverable
- * in one place (matches the Spora convention of treating route
- * patterns as named constants rather than buried string literals).
+ * Loaded via Composer's `autoload.files` rather than PSR-4: this class lives
+ * in `routes/` by convention, not in `src/`. Centralising the path +
+ * middleware here keeps the route surface discoverable in one file.
  */
 
 namespace Spora\Plugins\TeamGraph;
