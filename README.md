@@ -3,9 +3,9 @@
 A per-principal directed graph of agent spawning relationships for
 [Spora](https://github.com/spora-ai/spora-core). The endpoint
 `GET /api/v1/plugins/team-graph/graph?principal_id=<id>` returns the
-principal's agents (nodes) and the recent `sub_agent` invocations
-between them (edges); the admin SPA renders the response as a
-Mermaid 10 flowchart at `/apps/team-graph`.
+principal's agents (nodes) and the `sub_agent` connections between them
+(edges); the admin SPA renders the edges as a Mermaid 10 flowchart and
+overlays the node cards as real DOM at `/apps/team-graph`.
 
 Read-only in v1 — no LLM-callable tools, no migrations, no agent
 templates.
@@ -14,12 +14,16 @@ templates.
 
 ```sh
 composer require spora-ai/spora-plugin-team-graph
+composer require spora-ai/spora-plugin-team-graph-frontend
 ```
 
-The plugin depends on its companion frontend bundle
-(`spora-ai/spora-plugin-team-graph-frontend`) which the operator
-app's `composer install` pulls in automatically via
-`spora-installer`.
+Two packages, as for any plugin with an operator-facing panel. This PHP
+package does **not** `require` the frontend half, so the app must require
+`spora-ai/spora-plugin-team-graph-frontend` itself — the explicit command
+above is a no-op if the dependency is ever pulled in transitively. The
+frontend package (`type: spora-plugin-frontend`) is what the
+`SporaPluginFrontendInstaller` drops into `public/plugins/team-graph/`;
+without it the app entry appears but the panel 404s on the bundle.
 
 ## Open it
 
@@ -32,19 +36,49 @@ serves from `/apps/team-graph`.
 
 * `src/TeamGraphPlugin.php` — entry point; wires DI bindings
   (`TeamGraphService`, `NodeResolver`, `EdgeResolver`,
-  `TeamGraphController`) via `ContainerBuildingEvent` and registers
-  the single GET route via `RoutesRegisteringEvent`.
+  `TeamGraphController`, plus the `ToolConfigServiceInterface` alias PHP-DI
+  cannot infer) via `ContainerBuildingEvent` and registers the single GET
+  route via `RoutesRegisteringEvent`.
+* `routes/team-graph.php` — the route path and its middleware
+  (`AuthMiddleware`, `CsrfMiddleware`) in one place, loaded through
+  Composer's `autoload.files` because it sits outside PSR-4's `src/`.
 * `src/TeamGraphApp.php` — admin-panel metadata
   (`VueAppInterface`).
 * `src/Http/TeamGraphController.php` — `GET …/graph?principal_id=…`
-  → `data` envelope.
+  → `data` envelope; 401 / 403 / 422 mapping.
 * `src/Services/TeamGraphService.php` — principal gate + envelope
   assembly.
 * `src/Services/NodeResolver.php` — agent aggregation in one SQL
-  pass (active chats, 24h recent, latest in-flight status).
-* `src/Services/EdgeResolver.php` — `sub_agent` `tool_calls` →
-  deduped `(parent, target)` edges with the live `count_24h` /
-  `last_invoked_at`.
+  pass (active chats, 24h recent, latest in-flight status, and the
+  `AgentPictureService` wire shape resolved inline so there is no N+1
+  against `agent_pictures` / `media_assets`).
+* `src/Services/EdgeResolver.php` — one edge per `(source, target)` pair in
+  each source agent's **configured** `allowed_target_agents` allowlist for
+  `SubAgentTool`, read through the same
+  `ToolConfigServiceInterface::getEffectiveSettings()` cascade the tool
+  checks at runtime. So the graph shows connections that are configured but
+  have never fired, and drops cross-principal targets the way
+  `SubAgentTool::sharePrincipal()` would. `sub_agent` `tool_calls` are read
+  only to enrich those edges with `count_24h` (24h window) and
+  `last_invoked_at` (7d window) — never to add or remove one.
+
+## Frontend contract
+
+The host SPA loads the bundle from
+`/plugins/team-graph/main.js` (`TeamGraphApp::entry()`), which must be the
+frontend package's `build.lib.fileName()`. The bundle installs a
+mount/unmount contract on `window.SporaAppTeamGraph`:
+
+```ts
+window.SporaAppTeamGraph = {
+    mount: (target: HTMLElement, hostContext: PluginHostContext) => void | Promise<void>,
+    unmount: (target: HTMLElement) => void,
+}
+```
+
+`hostContext` carries the host's `api`, `pinia`, `theme`, `route` and
+`router`; the plugin installs its own Pinia for plugin-local state and
+branches the host client in through `src/api/client.ts`.
 
 ## Tests
 
@@ -54,11 +88,18 @@ composer test:parallel
 
 The suite covers:
 
-* `TeamGraphServiceTest` — 5 unit tests with mocked resolvers.
-* `TeamGraphControllerTest` — 4 feature tests against an in-memory
-  SQLite (auth gate, principal control, validation).
-* `TeamGraphPluginTest` — 6 wiring tests (DI bindings, route
-  registration, CSRF + Auth middleware attachment).
+* `TeamGraphServiceTest` — drives the service, both resolvers and the
+  envelope against the same in-memory SQLite the feature suite uses, with
+  only `ToolConfigServiceInterface` mocked so each scenario can script its
+  own allowlist. Areas: node aggregates and status, configured-vs-observed
+  edge emission, `tool_calls` enrichment, cross-principal and archived
+  filtering, `profile_picture` wire shape (palette fallback, `variant_key`
+  derivation), and the principal-access refusal.
+* `TeamGraphControllerTest` — feature tests against an in-memory SQLite
+  (auth gate, principal control, validation).
+* `TeamGraphPluginTest` — wiring: event subscriptions, the DI bindings, the
+  registered route with its middleware, and the app's `VueAppInterface`
+  contract.
 
 ## Plan
 
