@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Database\Capsule\Manager as Capsule;
 use Mockery as M;
 use Spora\Plugins\TeamGraph\Http\TeamGraphController;
 use Spora\Plugins\TeamGraph\Services\EdgeResolver;
@@ -85,7 +86,7 @@ it('GET graph returns 200 with the data envelope when the caller controls the pr
         ->and($body['data']['generated_at'])->toBeString();
 });
 
-it('GET graph returns 403 when the caller does not control the principal', function (): void {
+it('GET graph returns 403 when the caller cannot see the principal', function (): void {
     [$controller, $auth] = makeGraphController();
     $userId = createGraphTestUser($auth, 'caller@example.com');
 
@@ -104,6 +105,59 @@ it('GET graph returns 403 when the caller does not control the principal', funct
 
     $body = json_decode((string) $response->getContent(), true);
     expect($body['error']['code'])->toBe('FORBIDDEN');
+});
+
+it('GET graph returns 200 for a member-role caller on a group principal', function (): void {
+    [$controller, $auth] = makeGraphController();
+    $memberId = createGraphTestUser($auth, 'member@example.com');
+    // The gate is the same membership rule `GET /api/v1/principals/me`
+    // applies, and that rule is anchored on the caller's own user-principal:
+    // without one it enumerates nothing.
+    createUserPrincipal($memberId);
+
+    $ownerId = bootAuth(bootAuthLayer(), 'groupowner@example.com', 'Password1!', 'Group Owner');
+    $groupId = Capsule::table('groups')->insertGetId([
+        'name'               => 'Design Team',
+        'created_by_user_id' => $ownerId,
+        'created_at'         => date('Y-m-d H:i:s'),
+        'updated_at'         => date('Y-m-d H:i:s'),
+    ]);
+    $groupPrincipalId = (int) Capsule::table('principals')->insertGetId([
+        'type'       => 'group',
+        'group_id'   => $groupId,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+    Capsule::table('group_memberships')->insert([
+        'group_id'   => $groupId,
+        'user_id'    => $ownerId,
+        'role'       => 'owner',
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+    // The regression: role `member` was refused with 403 by the control-tier
+    // gate, while `GET /api/v1/principals/me` had already listed the group
+    // in this caller's picker.
+    Capsule::table('group_memberships')->insert([
+        'group_id'   => $groupId,
+        'user_id'    => $memberId,
+        'role'       => 'member',
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    simulateLoggedInSession($memberId, 'member@example.com');
+
+    $request = Request::create(GRAPH_PATH . '?principal_id=' . $groupPrincipalId, 'GET');
+    $response = $controller->graph($request);
+
+    expect($response->getStatusCode())->toBe(Response::HTTP_OK);
+
+    $body = json_decode((string) $response->getContent(), true);
+    expect($body['data']['principal']['id'])->toBe($groupPrincipalId)
+        ->and($body['data']['principal']['type'])->toBe('group')
+        ->and($body['data']['principal']['name'])->toBe('Design Team')
+        ->and($body['data']['principal']['is_current_user_owned'])->toBeFalse();
 });
 
 it('GET graph returns 422 when principal_id is missing', function (): void {

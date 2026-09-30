@@ -49,7 +49,7 @@ final class EdgeResolver
     public function __construct(
         private readonly ToolConfigServiceInterface $toolConfig,
         /**
-         * Ownership gate for callers that reach this resolver directly.
+         * Visibility gate for callers that reach this resolver directly.
          * Required rather than nullable: a defaulted dependency here
          * would let the gate silently no-op for whoever constructed the
          * resolver without it, and a security check that can be
@@ -60,7 +60,7 @@ final class EdgeResolver
     ) {}
 
     /**
-     * @throws PrincipalNotAccessibleException When the caller doesn't control the principal.
+     * @throws PrincipalNotAccessibleException When the principal is not visible to the caller.
      *
      * @return list<array{
      *     id: string,
@@ -74,7 +74,7 @@ final class EdgeResolver
      */
     public function resolveEdges(int $principalId, int $callerUserId): array
     {
-        $this->assertCallerControlsPrincipal($callerUserId, $principalId);
+        $this->assertCallerCanSeePrincipal($callerUserId, $principalId);
 
         $sourceAgentIds = $this->principalAgentIds($principalId);
         if ($sourceAgentIds === []) {
@@ -119,12 +119,16 @@ final class EdgeResolver
      * any plugin can reach it through `\DI\get()` and would otherwise be
      * able to read another principal's allowlists. Mirrors the gate
      * `SubAgentService` and `AgentTargetResolver` apply on the runtime path.
+     *
+     * Same membership rule as `TeamGraphService`, so a group member
+     * reaching the resolver directly gets the graph they would have got
+     * through the endpoint rather than a 403 the panel cannot explain.
      */
-    private function assertCallerControlsPrincipal(int $callerUserId, int $principalId): void
+    private function assertCallerCanSeePrincipal(int $callerUserId, int $principalId): void
     {
-        if (!$this->principals->callerControlsPrincipal($callerUserId, $principalId)) {
+        if (!in_array($principalId, $this->principals->visiblePrincipalIdsFor($callerUserId), true)) {
             throw new PrincipalNotAccessibleException(
-                "Caller {$callerUserId} does not control principal {$principalId}.",
+                "Caller {$callerUserId} cannot access principal {$principalId}.",
             );
         }
     }
