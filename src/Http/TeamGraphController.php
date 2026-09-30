@@ -29,7 +29,7 @@ final class TeamGraphController
         private readonly TeamGraphService $service,
     ) {}
 
-    public function graph(Request $request): JsonResponse
+    public function graph(Request $request): JsonResponse // NOSONAR php:S1142 — the returns are guard clauses: unauthenticated / invalid input / refused, each returning its own status+body, and collapsing them would nest the happy path under two error branches to save one `return`
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null) {

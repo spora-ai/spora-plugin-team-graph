@@ -6,6 +6,7 @@ namespace Spora\Plugins\TeamGraph\Services;
 
 use DateTimeInterface;
 use Illuminate\Database\Capsule\Manager as Capsule;
+use Illuminate\Support\Carbon;
 use Spora\Services\AgentPictures\Archetype;
 use Spora\Services\AgentPictures\Palette;
 
@@ -65,7 +66,7 @@ final class NodeResolver
      */
     public function resolveNodes(int $principalId): array
     {
-        $cutoff = \Illuminate\Support\Carbon::now()->subHours(24)->format('Y-m-d H:i:s');
+        $cutoff = Carbon::now()->subHours(24)->format('Y-m-d H:i:s');
 
         $sql = <<<'SQL'
             SELECT
@@ -104,81 +105,136 @@ final class NodeResolver
 
         $rows = Capsule::connection()->select($sql, [$cutoff, $principalId]);
 
-        return array_map(
-            function (object $row): array {
-                $paletteKey = $row->palette_key !== null ? (string) $row->palette_key : null;
-                $palette    = $paletteKey !== null ? Palette::tryFrom($paletteKey) : null;
-                /*
-                 * Invalid palette keys (drift, partial migrations, an
-                 * upstream rename) fall back to Slate rather than 500-ing
-                 * the endpoint. Mirrors the host's
-                 * `AgentPictureService` `tryFrom() ?? DEFAULT_PALETTE`.
-                 */
-                $palette ??= Palette::Slate;
+        return array_map(self::nodeFromRow(...), $rows);
+    }
 
-                $hasImage = $row->media_asset_id !== null;
+    /**
+     * One selected row to one node on the envelope.
+     *
+     * Extracted from the query's `array_map` so the row-shaping rules —
+     * which are the part worth reading — are not buried under the SQL
+     * that feeds them.
+     *
+     * @param  object $row
+     * @return array<string, mixed>
+     */
+    private static function nodeFromRow(object $row): array
+    {
+        return [
+            'id'   => (int) $row->id,
+            'name' => (string) $row->name,
+            /*
+             * Wire-compat placeholders, not columns: `agents` has
+             * neither one (000003) and the picture data moved to
+             * `agent_pictures` in 0062, but the frontend's
+             * `GraphNode` type still declares both as required
+             * fields, so they stay on the envelope.
+             */
+            'role'            => null,
+            'picture_url'     => null,
+            // The COALESCE makes the `??` unreachable; defensive only.
+            'status'          => (string) ($row->status ?? 'COMPLETED'),
+            'active_chats'    => (int) $row->active_chats,
+            'recent_chats_24h' => (int) $row->recent_chats_24h,
+            'profile_picture' => self::pictureWireShape($row),
+        ];
+    }
 
-                /*
-                 * A missing or unrecognised `archetype` becomes the host's
-                 * default rather than a null: the shared `Avatar` takes its
-                 * archetype tile only when `typeof archetype === 'string'`,
-                 * so forwarding the raw column sends every agent without one
-                 * back to initials — the same failure the `variant_key`
-                 * derivation below exists to prevent. Mirrors the host's
-                 * `AgentPictureService::avatarWireShape()`.
-                 */
-                $archetype = $row->archetype !== null
-                    ? Archetype::tryFrom((string) $row->archetype) ?? self::DEFAULT_ARCHETYPE
-                    : self::DEFAULT_ARCHETYPE;
+    /**
+     * The `AgentPictureService` wire shape, from columns already joined
+     * into the row.
+     *
+     * The two branches are not variants of one shape: an image carries
+     * the picture and nothing else, while an avatar carries a glyph
+     * identity (archetype + variant) and its resolved colours. Mixing
+     * them is what the shared `Avatar` keys off, so each branch nulls
+     * the other's fields rather than emitting both.
+     *
+     * @return array{
+     *     kind: 'image'|'avatar',
+     *     archetype: string|null,
+     *     variant_key: string|null,
+     *     palette_key: string|null,
+     *     bg_color: string|null,
+     *     fg_color: string|null,
+     *     image_url: string|null,
+     *     image_updated_at: string|null,
+     * }
+     */
+    private static function pictureWireShape(object $row): array
+    {
+        $imageUrl = $row->image_url;
+        $updatedAt = $row->image_updated_at;
+        if ($row->media_asset_id !== null) {
+            return [
+                'kind'             => 'image',
+                'archetype'        => null,
+                'variant_key'      => null,
+                'palette_key'      => null,
+                'bg_color'         => null,
+                'fg_color'         => null,
+                'image_url'        => $imageUrl !== null ? (string) $imageUrl : null,
+                'image_updated_at' => $updatedAt !== null ? self::atom($updatedAt) : null,
+            ];
+        }
 
-                /*
-                 * A missing `variant_key` is *derived*, never forwarded as
-                 * null: the host does the same, and the shared `Avatar`
-                 * takes its archetype branch only when
-                 * `typeof variant_key === 'string'`. Both sides run the same
-                 * FNV-1a derivation, so the canvas and the dashboard cannot
-                 * disagree on the glyph. See `resolveVariantKey()`.
-                 */
-                $variantKey = $hasImage || $row->variant_key !== null
-                    ? ($hasImage ? null : (string) $row->variant_key)
-                    : self::resolveVariantKey((int) $row->id);
+        $paletteKey = $row->palette_key !== null ? (string) $row->palette_key : null;
+        $palette = $paletteKey !== null ? Palette::tryFrom($paletteKey) : null;
+        /*
+         * Invalid palette keys (drift, partial migrations, an upstream
+         * rename) fall back to Slate rather than 500-ing the endpoint.
+         * Mirrors the host's `AgentPictureService` `tryFrom() ?? DEFAULT_PALETTE`.
+         */
+        $palette ??= Palette::Slate;
 
-                return [
-                    'id'   => (int) $row->id,
-                    'name' => (string) $row->name,
-                    /*
-                     * Wire-compat placeholders, not columns: `agents` has
-                     * neither one (000003) and the picture data moved to
-                     * `agent_pictures` in 0062, but the frontend's
-                     * `GraphNode` type still declares both as required
-                     * fields, so they stay on the envelope.
-                     */
-                    'role'            => null,
-                    'picture_url'     => null,
-                    // The COALESCE makes the `??` unreachable; defensive only.
-                    'status'          => (string) ($row->status ?? 'COMPLETED'),
-                    'active_chats'    => (int) $row->active_chats,
-                    'recent_chats_24h' => (int) $row->recent_chats_24h,
-                    'profile_picture' => [
-                        'kind'             => $hasImage ? 'image' : 'avatar',
-                        'archetype'        => $hasImage ? null : $archetype->value,
-                        'variant_key'      => $variantKey,
-                        'palette_key'      => $hasImage ? null : $palette->value,
-                        'bg_color'         => $hasImage ? null : $palette->background(),
-                        'fg_color'         => $hasImage ? null : $palette->foreground(),
-                        'image_url'        => $hasImage && $row->image_url !== null ? (string) $row->image_url : null,
-                        'image_updated_at' => $hasImage && $row->image_updated_at !== null
-                            ? \Carbon\Carbon::parse((string) $row->image_updated_at)->format(DateTimeInterface::ATOM)
-                            : null,
-                    ],
-                ];
-            },
-            $rows,
-        );
+        $stored = $row->archetype !== null ? (string) $row->archetype : null;
+        /*
+         * A missing or unrecognised `archetype` becomes the host's
+         * default rather than a null: the shared `Avatar` takes its
+         * archetype tile only when `typeof archetype === 'string'`, so
+         * forwarding the raw column sends every agent without one back to
+         * initials — the same failure the `variant_key` derivation exists
+         * to prevent. Mirrors `AgentPictureService::avatarWireShape()`.
+         */
+        $archetype = ($stored !== null ? Archetype::tryFrom($stored) : null) ?? self::DEFAULT_ARCHETYPE;
+
+        /*
+         * A missing `variant_key` is *derived*, never forwarded as null:
+         * the host does the same, and the shared `Avatar` takes its
+         * archetype branch only when `typeof variant_key === 'string'`.
+         * Both sides run the same FNV-1a derivation, so the canvas and
+         * the dashboard cannot disagree on the glyph. See
+         * `resolveVariantKey()`.
+         */
+        $storedVariant = $row->variant_key !== null ? (string) $row->variant_key : null;
+
+        return [
+            'kind'             => 'avatar',
+            'archetype'        => $archetype->value,
+            'variant_key'      => $storedVariant ?? self::resolveVariantKey((int) $row->id),
+            'palette_key'      => $palette->value,
+            'bg_color'         => $palette->background(),
+            'fg_color'         => $palette->foreground(),
+            'image_url'        => null,
+            'image_updated_at' => null,
+        ];
     }
 
     /** The variant count the host's archetype table has (`v0`, `v1`, `v2`). */
     private const VARIANT_COUNT = 3;
+
+    /**
+     * A stored `Y-m-d H:i:s` timestamp in the envelope's wire format.
+     *
+     * Every date on the envelope is ATOM, so the DB column is parsed
+     * here rather than handed on raw: a consumer should not need a second
+     * date format, and this is also the cache-buster key the frontend
+     * appends to the image URL.
+     */
+    private static function atom(mixed $value): string
+    {
+        return Carbon::parse((string) $value)->format(DateTimeInterface::ATOM);
+    }
 
     /**
      * Deterministic 3-bucket variant selection, byte-identical to the host's

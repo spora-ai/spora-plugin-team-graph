@@ -62,7 +62,7 @@ final class TeamGraphService
         ];
     }
 
-    private function principalName(?Principal $principal): string
+    private function principalName(?Principal $principal): string // NOSONAR php:S1142 — one early return per principal kind (no principal / group / user row missing / no username), each with its own fallback; a single exit would need a local per-branch and read worse
     {
         if ($principal === null) {
             return '';

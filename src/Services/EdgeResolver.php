@@ -300,31 +300,44 @@ final class EdgeResolver
         return array_values(array_unique($out));
     }
 
-    private function extractTargetAgentId(mixed $raw): ?int
+    /**
+     * The agent id a `proposed_arguments` payload names, or `null`.
+     *
+     * The three string forms are the LLM's, in the order
+     * `SubAgentTool::resolveTargetAgentId()` tries them: a name with the
+     * id in parentheses ("Research Agent (#3)"), a bare "#3", and a plain
+     * integer string. Mirroring the order matters — the parenthesised
+     * form must win over the bare-hash form, and a name like
+     * "Agent #3" only parses under the first.
+     */
+    private function extractTargetAgentId(mixed $raw): ?int // NOSONAR php:S1142 — each early return corresponds to one of the shapes SubAgentTool::resolveTargetAgentId() recognises (int, parenthesised name, bare #id, digit string); fusing them would obscure that this mirrors a host parser
     {
         $decoded = $this->decodeJson($raw);
-        if (!is_array($decoded)) {
-            return null;
-        }
-        $value = $decoded['target_agent_id'] ?? null;
+        $value = is_array($decoded) ? ($decoded['target_agent_id'] ?? null) : null;
+
         if (is_int($value)) {
             return $value;
         }
-        if (is_string($value) && $value !== '') {
-            if (preg_match('/.*\(#(\d+)\)\s*$/', $value, $m)) {
+        if (!is_string($value) || $value === '') {
+            return null;
+        }
+
+        foreach (['/.*\(#(\d+)\)\s*$/', '/^#(\d+)\s*$/'] as $pattern) {
+            if (preg_match($pattern, $value, $m) === 1) {
                 return (int) $m[1];
-            }
-            if (preg_match('/^#(\d+)\s*$/', $value, $m)) {
-                return (int) $m[1];
-            }
-            if (ctype_digit($value)) {
-                return (int) $value;
             }
         }
-        return null;
+
+        return ctype_digit($value) ? (int) $value : null;
     }
 
     /**
+     * `proposed_arguments` arrives as a JSON string, but a decoded array
+     * is accepted too so a caller that already parsed it is not forced
+     * to re-encode. Anything unparseable is `null`, not an exception:
+     * the column holds model-authored text and a malformed row must not
+     * take the whole graph down.
+     *
      * @return mixed
      */
     private function decodeJson(mixed $raw)
@@ -332,12 +345,15 @@ final class EdgeResolver
         if (is_array($raw)) {
             return $raw;
         }
-        if (!is_string($raw) || $raw === '') {
+        if (!is_string($raw)) {
             return null;
         }
+
         try {
             return json_decode($raw, true, 16, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
+            // An empty string is not malformed JSON, it is an absent
+            // value; it decodes to null, which is the same answer.
             return null;
         }
     }
