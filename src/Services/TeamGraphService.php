@@ -17,6 +17,15 @@ use Spora\Services\PrincipalService;
  *
  * The principal check lives here rather than in the controller so the gate
  * is exercised by every path that can build a graph.
+ *
+ * The gate is *visibility*, not *control*: a principal the caller can act
+ * as. `PrincipalService::visiblePrincipalIdsFor()` is the same membership
+ * rule `GET /api/v1/principals/me` and the agent list use, so the sidebar
+ * never offers a principal this endpoint then refuses. Control
+ * (`callerControlsPrincipal()`, i.e. group `owner`/`admin`) belongs to the
+ * write paths — agent transfer, group settings — and is the wrong tier for a
+ * read panel: a group member can already list and open every agent in the
+ * group, so the graph shows them nothing they could not see anyway.
  */
 final class TeamGraphService
 {
@@ -27,7 +36,7 @@ final class TeamGraphService
     ) {}
 
     /**
-     * @throws PrincipalNotAccessibleException When the caller doesn't control the principal.
+     * @throws PrincipalNotAccessibleException When the principal is not visible to the caller.
      *
      * @return array{
      *     principal: array{id: int, type: string, name: string, is_current_user_owned: bool},
@@ -38,9 +47,9 @@ final class TeamGraphService
      */
     public function buildGraph(int $principalId, int $callerUserId): array
     {
-        if (!$this->principals->callerControlsPrincipal($callerUserId, $principalId)) {
+        if (!in_array($principalId, $this->principals->visiblePrincipalIdsFor($callerUserId), true)) {
             throw new PrincipalNotAccessibleException(
-                "Caller {$callerUserId} does not control principal {$principalId}.",
+                "Caller {$callerUserId} cannot access principal {$principalId}.",
             );
         }
 

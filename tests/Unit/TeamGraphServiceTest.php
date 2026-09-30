@@ -76,6 +76,44 @@ function seedPrincipal(int $principalId, int $userId): void
     ]);
 }
 
+/**
+ * Seed a group plus its group-principal and return the principal id.
+ *
+ * `created_by_user_id` is an FK to `users`, so the owner row must exist
+ * before the group is inserted.
+ */
+function seedGroupPrincipal(int $groupId, int $principalId, int $ownerUserId, string $name = 'Team'): int
+{
+    Capsule::table('groups')->insert([
+        'id'                => $groupId,
+        'name'              => $name,
+        'created_by_user_id' => $ownerUserId,
+        'created_at'        => date('Y-m-d H:i:s'),
+        'updated_at'        => date('Y-m-d H:i:s'),
+    ]);
+    Capsule::table('principals')->insert([
+        'id'         => $principalId,
+        'type'       => 'group',
+        'group_id'   => $groupId,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+
+    return $principalId;
+}
+
+/** Seed a `group_memberships` row at the given role. */
+function seedMembership(int $groupId, int $userId, string $role): void
+{
+    Capsule::table('group_memberships')->insert([
+        'group_id'   => $groupId,
+        'user_id'    => $userId,
+        'role'       => $role,
+        'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+}
+
 function seedAgent(
     int $agentId,
     int $principalId,
@@ -330,7 +368,7 @@ it('reads the allowlist with the runtime\'s own call shape — a user id and no 
         ->and($payload['edges'][0]['id'])->toBe('11->4');
 });
 
-it('refuses to resolve edges for a principal the caller does not control', function (): void {
+it('refuses to resolve edges for a principal the caller cannot see', function (): void {
     seedUser(1, 'o@example.com');
     seedPrincipal(42, 1);
     seedUser(99, 'foreign@example.com');
@@ -344,6 +382,40 @@ it('refuses to resolve edges for a principal the caller does not control', funct
     $resolver = new EdgeResolver(mockToolConfig([11 => [4]]), new PrincipalService(new PrincipalResolver()));
 
     expect(fn() => $resolver->resolveEdges(99, 1))
+        ->toThrow(PrincipalNotAccessibleException::class);
+});
+
+it('resolves edges for a plain group member, not only owners and admins', function (): void {
+    seedUser(1, 'member@example.com');
+    seedPrincipal(1, 1);
+    seedUser(2, 'owner@example.com');
+    seedPrincipal(2, 2);
+    seedUser(3, 'peer@example.com');
+    seedPrincipal(3, 3);
+    seedUser(4, 'outsider@example.com');
+    seedPrincipal(4, 4);
+    seedUser(5, 'admin@example.com');
+    seedPrincipal(5, 5);
+    $groupPrincipal = seedGroupPrincipal(42, 42, 2);
+    seedMembership(42, 2, 'owner');
+    seedMembership(42, 3, 'member');
+    seedMembership(42, 5, 'admin');
+    seedAgent(11, $groupPrincipal);
+    seedAgent(4, $groupPrincipal);
+
+    $service = makeService(mockToolConfig([11 => [4]]));
+
+    // Every role that is a member of the group reads the same graph.
+    foreach ([2, 3, 5] as $callerUserId) {
+        $payload = $service->buildGraph(42, $callerUserId);
+        expect($payload['edges'])->toHaveCount(1)
+            ->and($payload['edges'][0]['id'])->toBe('11->4')
+            ->and($payload['nodes'])->toHaveCount(2);
+    }
+
+    // User 4 is a registered user with a user-principal of their own, but
+    // no membership in this group.
+    expect(fn() => $service->buildGraph(42, 4))
         ->toThrow(PrincipalNotAccessibleException::class);
 });
 
@@ -643,12 +715,40 @@ it('sends no variant at all on the image branch, where the archetype is replaced
     ]);
 });
 
-it('throws PrincipalNotAccessibleException when the caller does not control the principal', function (): void {
+it('throws PrincipalNotAccessibleException when the principal is not visible to the caller', function (): void {
     seedUser(1, 'o@example.com');
     seedPrincipal(42, 1);
     seedUser(99, 'foreign@example.com');
     seedPrincipal(99, 99);
 
     expect(fn() => makeService()->buildGraph(99, 1))
+        ->toThrow(PrincipalNotAccessibleException::class);
+});
+
+it('reads a group graph for a member-role caller, and still refuses a non-member', function (): void {
+    seedUser(1, 'member@example.com');
+    seedPrincipal(1, 1);
+    seedUser(2, 'owner@example.com');
+    seedPrincipal(2, 2);
+    seedUser(3, 'outsider@example.com');
+    seedPrincipal(3, 3);
+    $groupPrincipal = seedGroupPrincipal(42, 42, 2, 'Design Team');
+    seedMembership(42, 2, 'owner');
+    seedMembership(42, 1, 'member');
+    seedAgent(11, $groupPrincipal);
+
+    $service = makeService();
+
+    $payload = $service->buildGraph(42, 1);
+
+    expect($payload['principal']['id'])->toBe(42)
+        ->and($payload['principal']['type'])->toBe('group')
+        ->and($payload['principal']['name'])->toBe('Design Team')
+        ->and($payload['principal']['is_current_user_owned'])->toBeFalse()
+        ->and($payload['nodes'])->toHaveCount(1);
+
+    // The member is not in the group and must stay locked out — the fix is
+    // membership, not "any authenticated caller".
+    expect(fn() => $service->buildGraph(42, 3))
         ->toThrow(PrincipalNotAccessibleException::class);
 });

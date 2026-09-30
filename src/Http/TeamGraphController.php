@@ -18,7 +18,9 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * The principal-id gate is enforced in
  * {@see TeamGraphService::buildGraph()} via
- * `PrincipalService::callerControlsPrincipal()`; this controller surfaces
+ * `PrincipalService::visiblePrincipalIdsFor()` — the membership rule
+ * `GET /api/v1/principals/me` uses, so the panel's own principal picker
+ * cannot offer a principal this endpoint refuses. This controller surfaces
  * the 403 envelope when the service refuses. `CsrfMiddleware` is a no-op on
  * GET, so the chain effectively enforces "logged-in caller" only.
  */

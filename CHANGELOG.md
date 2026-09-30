@@ -8,6 +8,30 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 Nothing yet.
 
+## [0.1.2] — 2026-09-30
+
+### Fixed
+
+- **Group members can now open a group's graph.** The endpoint gated on
+  `PrincipalService::callerControlsPrincipal()`, which demands group
+  `owner`/`admin`, so any user whose `group_memberships.role` was the
+  default `member` got `403 FORBIDDEN` — *"Caller 1 does not control
+  principal 16."* The gate is now
+  `PrincipalService::visiblePrincipalIdsFor()`, the same membership rule
+  `GET /api/v1/principals/me` and the agent list use, so the panel's own
+  principal picker can no longer offer a principal the endpoint refuses.
+  The `403` message is now *"cannot access"* rather than *"does not
+  control"*, matching the rule it actually enforces.
+- The same gate in `EdgeResolver` (the defence-in-depth check for callers
+  that reach the autowired resolver through `\DI\get()`) moved to the
+  membership rule, so a member reaching the resolver directly gets the
+  same graph the endpoint would give them.
+
+Unchanged: callers outside the group still get `403`, including global
+admins who are not members — existence-hiding is the same rule
+`GroupAuthorizationTrait::callerCanSeeGroup()` applies to every other
+group read.
+
 ## [0.1.1] — 2026-09-30
 
 ### Fixed
@@ -32,6 +56,7 @@ Nothing yet.
 - `TeamGraphApp` — the `/apps/team-graph` admin entry (Mermaid 10
   rendering, node cards as a Vue overlay).
 
-[Unreleased]: https://github.com/spora-ai/spora-plugin-team-graph/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/spora-ai/spora-plugin-team-graph/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/spora-ai/spora-plugin-team-graph/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/spora-ai/spora-plugin-team-graph/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/spora-ai/spora-plugin-team-graph/releases/tag/v0.1.0

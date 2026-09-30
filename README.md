@@ -32,6 +32,21 @@ migration) and the regular `bin/spora spora:install` step, the
 `Team Graph` entry appears under the admin panel's sidebar. It
 serves from `/apps/team-graph`.
 
+## Who can open which graph
+
+The endpoint is gated on **visibility, not control** — the same rule
+`GET /api/v1/principals/me` applies, so the panel's own principal picker
+can never offer a principal the endpoint then refuses. A caller may read:
+
+* their own user-principal, and
+* the group-principal of **every** group they belong to, at any role
+  (`member` included) — a member can already list and open every agent in
+  the group, so the graph shows them nothing they could not see anyway.
+
+Anything else is a `403 FORBIDDEN`. Group `owner`/`admin` ("control") is
+the tier the *write* paths use — agent transfer, group settings — and is
+deliberately not required here.
+
 ## Architecture
 
 * `src/TeamGraphPlugin.php` — entry point; wires DI bindings
@@ -46,8 +61,8 @@ serves from `/apps/team-graph`.
   (`VueAppInterface`).
 * `src/Http/TeamGraphController.php` — `GET …/graph?principal_id=…`
   → `data` envelope; 401 / 403 / 422 mapping.
-* `src/Services/TeamGraphService.php` — principal gate + envelope
-  assembly.
+* `src/Services/TeamGraphService.php` — principal visibility gate +
+  envelope assembly.
 * `src/Services/NodeResolver.php` — agent aggregation in one SQL
   pass (active chats, 24h recent, latest in-flight status, and the
   `AgentPictureService` wire shape resolved inline so there is no N+1
@@ -94,9 +109,9 @@ The suite covers:
   own allowlist. Areas: node aggregates and status, configured-vs-observed
   edge emission, `tool_calls` enrichment, cross-principal and archived
   filtering, `profile_picture` wire shape (palette fallback, `variant_key`
-  derivation), and the principal-access refusal.
+  derivation), and the principal-visibility refusal.
 * `TeamGraphControllerTest` — feature tests against an in-memory SQLite
-  (auth gate, principal control, validation).
+  (auth gate, principal visibility per group role, validation).
 * `TeamGraphPluginTest` — wiring: event subscriptions, the DI bindings, the
   registered route with its middleware, and the app's `VueAppInterface`
   contract.
