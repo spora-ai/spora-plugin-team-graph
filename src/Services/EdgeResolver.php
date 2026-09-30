@@ -340,7 +340,7 @@ final class EdgeResolver
      *
      * @return mixed
      */
-    private function decodeJson(mixed $raw) // NOSONAR php:S1142 — three returns for three input shapes (already an array / not a string / unparseable), where the unparseable case is a catch rather than a branch and cannot be folded into the guard
+    private function decodeJson(mixed $raw)
     {
         if (is_array($raw)) {
             return $raw;

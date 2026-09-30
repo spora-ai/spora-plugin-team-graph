@@ -105,7 +105,7 @@ final class NodeResolver
 
         $rows = Capsule::connection()->select($sql, [$cutoff, $principalId]);
 
-        return array_map(self::nodeFromRow(...), $rows);
+        return array_map(static fn(object $row): array => self::nodeFromRow($row), $rows);
     }
 
     /**
