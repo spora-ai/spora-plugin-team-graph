@@ -5,7 +5,8 @@
     "license": "MIT",
     "require": {
         "php": "^8.4.1",
-        "spora-ai/spora-core": ">=0.23.0 <2.0.0 || @dev"
+        "spora-ai/spora-core": ">=0.23.0 <2.0.0 || @dev",
+        "spora-ai/spora-plugin-team-graph-frontend": ">=0.1.0 <2.0.0"
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.94",
@@ -42,14 +43,17 @@
             "spora-ai/installer": true
         },
         "preferred-install": {
-            "spora-ai/spora-core": "source",
-            "spora-ai/spora-plugin-team-graph-frontend": "source"
+            "spora-ai/spora-core": "source"
         }
     },
     "repositories": [
         {
             "type": "vcs",
             "url": "https://github.com/spora-ai/spora-core.git"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/spora-ai/spora-plugin-team-graph-frontend.git"
         }
     ],
     "minimum-stability": "dev",

@@ -4,6 +4,9 @@
 /.php-cs-fixer.cache
 /.worktrees/
 /coverage.xml
+# Composer install artifact: SporaPluginFrontendInstaller copies the
+# frontend bundle here from the required -frontend package.
+/public/
 
 /tmp/
 
