@@ -322,13 +322,29 @@ final class EdgeResolver
             return null;
         }
 
+        $digits = self::digitsFromName($value);
+
+        return $digits ?? (ctype_digit($value) ? (int) $value : null);
+    }
+
+    /**
+     * The id inside a name that carries one, or `null`.
+     *
+     * The parenthesised form is tried first because it also matches a
+     * bare "#3" prefixed by a name ("Research Agent (#3)"), and the bare
+     * form is anchored so it cannot match a name that merely ends in a
+     * digit. Order and anchoring both come from
+     * `SubAgentTool::resolveTargetAgentId()`.
+     */
+    private static function digitsFromName(string $value): ?string
+    {
         foreach (['/.*\(#(\d+)\)\s*$/', '/^#(\d+)\s*$/'] as $pattern) {
             if (preg_match($pattern, $value, $m) === 1) {
-                return (int) $m[1];
+                return $m[1];
             }
         }
 
-        return ctype_digit($value) ? (int) $value : null;
+        return null;
     }
 
     /**
@@ -340,7 +356,7 @@ final class EdgeResolver
      *
      * @return mixed
      */
-    private function decodeJson(mixed $raw)
+    private function decodeJson(mixed $raw) // NOSONAR php:S1142 — 4 returns for 4 input shapes (already an array / not a string / decodes / unparseable); the unparseable branch is a catch, not an `if`, and folding it into a local would only rename the same value
     {
         if (is_array($raw)) {
             return $raw;
@@ -349,11 +365,11 @@ final class EdgeResolver
             return null;
         }
 
+        // An empty string is not malformed JSON, it is an absent value;
+        // json_decode('') is null, which is the same answer.
         try {
             return json_decode($raw, true, 16, JSON_THROW_ON_ERROR);
         } catch (JsonException) {
-            // An empty string is not malformed JSON, it is an absent
-            // value; it decodes to null, which is the same answer.
             return null;
         }
     }
