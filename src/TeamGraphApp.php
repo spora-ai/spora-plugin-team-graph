@@ -11,7 +11,7 @@ use Spora\Apps\VueAppInterface;
  *
  * The host loads the frontend bundle from the plugin slug + entry
  * filename, so `entry()` must match the frontend bundle's
- * `build.lib.fileName()` (default `main.js`).
+ * `build.lib.fileName()` — `main.js`.
  */
 final class TeamGraphApp implements VueAppInterface
 {
@@ -34,8 +34,8 @@ final class TeamGraphApp implements VueAppInterface
     {
         /*
          * Raw `d` path rather than a bundled icon name: the host registry
-         * falls back to rendering a string starting with `M`/`m` as a path.
-         * Stroke-only, so it inherits `currentColor` and the 24×24 viewBox.
+         * renders a string starting with `M <digit>` as a path. Stroke-only,
+         * so it inherits `currentColor` and the 24×24 viewBox.
          */
         return 'M 3.5 5.5 a 1.5 1.5 0 1 0 3 0 a 1.5 1.5 0 1 0 -3 0 '
             . 'M 17.5 5.5 a 1.5 1.5 0 1 0 3 0 a 1.5 1.5 0 1 0 -3 0 '
@@ -50,7 +50,7 @@ final class TeamGraphApp implements VueAppInterface
         /*
          * `violet` as the brand accent because no status colour collides
          * with it — pairing it with `purple` for ABORTED made the two read
-         * as near-duplicates. The frontend now uses fuchsia for ABORTED.
+         * as near-duplicates.
          */
         return 'violet';
     }

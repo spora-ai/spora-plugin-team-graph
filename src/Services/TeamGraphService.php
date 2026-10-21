@@ -18,14 +18,12 @@ use Spora\Services\PrincipalService;
  * The principal check lives here rather than in the controller so the gate
  * is exercised by every path that can build a graph.
  *
- * The gate is *visibility*, not *control*: a principal the caller can act
- * as. `PrincipalService::visiblePrincipalIdsFor()` is the same membership
- * rule `GET /api/v1/principals/me` and the agent list use, so the sidebar
- * never offers a principal this endpoint then refuses. Control
- * (`callerControlsPrincipal()`, i.e. group `owner`/`admin`) belongs to the
- * write paths — agent transfer, group settings — and is the wrong tier for a
- * read panel: a group member can already list and open every agent in the
- * group, so the graph shows them nothing they could not see anyway.
+ * The gate is *visibility*, not *control*. `visiblePrincipalIdsFor()` is
+ * the membership rule the principal picker and the agent list use, so the
+ * panel never offers a principal this endpoint then refuses. Control
+ * (`callerControlsPrincipal()`) belongs to the write paths and is the
+ * wrong tier for a read panel: a group member can already open every agent
+ * in the group, so the graph shows them nothing they could not see.
  */
 final class TeamGraphService
 {
