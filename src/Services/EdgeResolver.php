@@ -21,9 +21,8 @@ use Spora\Tools\SubAgentTool;
  * graph shows the connections the tool would let an agent fire, including
  * configured-but-never-used ones.
  *
- * "The same cascade" means the same *call shape*, not the same arguments as
- * an earlier revision of this class: like the runtime, we pass a user id and
- * **no** `PrincipalContext`. A context would collapse
+ * "The same cascade" means the same *call shape*: like the runtime, we pass
+ * a user id and **no** `PrincipalContext`. A context would collapse
  * `ToolConfigPrincipalCascade::resolvePrincipalIdsWithUserRef()` to the single
  * principal being graphed, so a group agent would be drawn against a
  * different allowlist than the one the tool actually enforces.
@@ -50,11 +49,11 @@ final class EdgeResolver
         private readonly ToolConfigServiceInterface $toolConfig,
         /**
          * Visibility gate for callers that reach this resolver directly.
-         * Required rather than nullable: a defaulted dependency here
-         * would let the gate silently no-op for whoever constructed the
-         * resolver without it, and a security check that can be
-         * switched off by omission is not one. The autowired container
-         * supplies it; tests must pass it too.
+         * Required rather than nullable: a defaulted dependency here would
+         * let the gate silently no-op for whoever constructed the resolver
+         * without it, and a security check that can be switched off by
+         * omission is not one. The autowired container supplies it; tests
+         * must pass it too.
          */
         private readonly PrincipalService $principals,
     ) {}
@@ -118,11 +117,10 @@ final class EdgeResolver
      * Defence in depth: this class is autowired into the host container, so
      * any plugin can reach it through `\DI\get()` and would otherwise be
      * able to read another principal's allowlists. Mirrors the gate
-     * `SubAgentService` and `AgentTargetResolver` apply on the runtime path.
-     *
-     * Same membership rule as `TeamGraphService`, so a group member
-     * reaching the resolver directly gets the graph they would have got
-     * through the endpoint rather than a 403 the panel cannot explain.
+     * `SubAgentService` and `AgentTargetResolver` apply on the runtime path,
+     * on `TeamGraphService`'s membership rule, so a group member reaching
+     * the resolver directly gets the graph they would have got through the
+     * endpoint rather than a 403 the panel cannot explain.
      */
     private function assertCallerCanSeePrincipal(int $callerUserId, int $principalId): void
     {
@@ -162,9 +160,9 @@ final class EdgeResolver
         // N+1 by design: `getEffectiveSettings()` is a service call that
         // walks global → group[0..N] → user-principal → agent override
         // behind crypto decode and schema normalisation, so batching it
-        // would mean re-implementing that cascade here. ~4 round-trips per
-        // source agent (~800 on a 200-agent principal) is accepted for v1's
-        // single admin-panel GET rather than trading correctness for it.
+        // would mean re-implementing that cascade here. The round trips
+        // are accepted for v1's single admin-panel GET rather than trading
+        // correctness for them.
         foreach ($sourceAgentIds as $sourceId) {
             $settings = $this->toolConfig->getEffectiveSettings(
                 SubAgentTool::class,
@@ -285,7 +283,6 @@ final class EdgeResolver
     }
 
     /**
-     * @param  mixed $raw
      * @return list<int>
      */
     private function coerceToIntList(mixed $raw): array
@@ -315,9 +312,9 @@ final class EdgeResolver
      * "Agent #3" only parses under the first.
      *
      * The label string is the *production* shape, not a legacy edge case:
-     * `SubAgentTool`'s `target_agent` schema parameter is the resolved
+     * `SubAgentTool`'s `target_agent_id` schema parameter is the resolved
      * "Name (#id)" `enum` label, so the LLM's `proposed_arguments` carry
-     * that string. The `is_int` branch above only ever fires for rows
+     * that string. The `is_int` branch below only ever fires for rows
      * written by older callers and for the tests' own fixtures.
      */
     private function extractTargetAgentId(mixed $raw): ?int
@@ -364,8 +361,6 @@ final class EdgeResolver
      * to re-encode. Anything unparseable is `null`, not an exception:
      * the column holds model-authored text and a malformed row must not
      * take the whole graph down.
-     *
-     * @return mixed
      */
     private function decodeJson(mixed $raw) // NOSONAR php:S1142 — 4 returns for 4 input shapes (already an array / not a string / decodes / unparseable); the unparseable branch is a catch, not an `if`, and folding it into a local would only rename the same value
     {

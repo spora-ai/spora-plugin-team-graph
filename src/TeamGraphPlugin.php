@@ -18,11 +18,6 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 /**
  * Plugin entry point for `spora-plugin-team-graph`.
  *
- * Read-only v1: one admin app (TeamGraphApp) and one endpoint
- * (`GET /api/v1/plugins/team-graph/graph?principal_id=…`) backed by
- * {@see TeamGraphService}. No LLM-callable tools, no migrations, no agent
- * templates.
- *
  * The entry-point class must stay at `src/TeamGraphPlugin.php` —
  * `PluginLoader` resolves the manifest's FQCN through PSR-4 only. Routes
  * register through {@see RoutesRegisteringEvent}; {@see AbstractPlugin} has
@@ -45,7 +40,7 @@ final class TeamGraphPlugin extends AbstractPlugin implements EventSubscriberInt
      * `ToolConfigServiceInterface` needs an explicit alias: PHP-DI cannot
      * autowire an interface, and the host binds only the concrete
      * `ToolConfigService`, so without it every request throws an
-     * `InvalidDefinition`. The rest autowire transitively.
+     * `InvalidDefinition`.
      */
     public function onContainerBuilding(ContainerBuildingEvent $event): void
     {
@@ -58,7 +53,6 @@ final class TeamGraphPlugin extends AbstractPlugin implements EventSubscriberInt
         ]);
     }
 
-    /** Path + middleware live in `routes/team-graph.php`, one file per concern. */
     public function onRoutesRegistering(RoutesRegisteringEvent $event): void
     {
         [$path, $handler, $middleware] = TeamGraphRoutes::graph();
@@ -86,5 +80,17 @@ final class TeamGraphPlugin extends AbstractPlugin implements EventSubscriberInt
     public function tools(): array
     {
         return [];
+    }
+
+    /**
+     * The plugin's `locales/` directory — one `<lang>.json` per language.
+     *
+     * @return string[]
+     */
+    public function translationsPaths(): array
+    {
+        return [
+            __DIR__ . '/../locales',
+        ];
     }
 }

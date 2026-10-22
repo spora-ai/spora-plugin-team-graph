@@ -32,7 +32,7 @@ final class NodeResolver
     /**
      * The host's `AgentPictureService::DEFAULT_ARCHETYPE`, pinned so a
      * picture row can never leave the canvas without a glyph. See the
-     * `Archetype::tryFrom()` call in `resolveNodes()`.
+     * `Archetype::tryFrom()` call in `pictureWireShape()`.
      */
     private const DEFAULT_ARCHETYPE = Archetype::Assistant;
 
@@ -111,9 +111,8 @@ final class NodeResolver
     /**
      * One selected row to one node on the envelope.
      *
-     * Extracted from the query's `array_map` so the row-shaping rules —
-     * which are the part worth reading — are not buried under the SQL
-     * that feeds them.
+     * Extracted from the query's `array_map` so the row-shaping rules are
+     * not buried under the SQL that feeds them.
      *
      * @return array<string, mixed>
      */
@@ -123,11 +122,10 @@ final class NodeResolver
             'id'   => (int) $row->id,
             'name' => (string) $row->name,
             /*
-             * Wire-compat placeholders, not columns: `agents` has
-             * neither one (000003) and the picture data moved to
-             * `agent_pictures` in 0062, but the frontend's
-             * `GraphNode` type still declares both as required
-             * fields, so they stay on the envelope.
+             * Wire-compat placeholders, not columns: `agents` has neither
+             * one (000003) and the picture data moved to `agent_pictures`
+             * in 0062, but the frontend's `GraphNode` type still declares
+             * both as required fields, so they stay on the envelope.
              */
             'role'            => null,
             'picture_url'     => null,
@@ -145,9 +143,9 @@ final class NodeResolver
      *
      * The two branches are not variants of one shape: an image carries
      * the picture and nothing else, while an avatar carries a glyph
-     * identity (archetype + variant) and its resolved colours. Mixing
-     * them is what the shared `Avatar` keys off, so each branch nulls
-     * the other's fields rather than emitting both.
+     * identity (archetype + variant) and its resolved colours. The
+     * shared `Avatar` keys off that split, so each branch nulls the
+     * other's fields rather than emitting both.
      *
      * @return array{
      *     kind: 'image'|'avatar',
@@ -191,9 +189,9 @@ final class NodeResolver
          * A missing or unrecognised `archetype` becomes the host's
          * default rather than a null: the shared `Avatar` takes its
          * archetype tile only when `typeof archetype === 'string'`, so
-         * forwarding the raw column sends every agent without one back to
-         * initials — the same failure the `variant_key` derivation exists
-         * to prevent. Mirrors `AgentPictureService::avatarWireShape()`.
+         * forwarding the raw column sends every agent without one back
+         * to initials — the same failure the `variant_key` derivation
+         * exists to prevent. Mirrors `AgentPictureService::avatarWireShape()`.
          */
         $archetype = ($stored !== null ? Archetype::tryFrom($stored) : null) ?? self::DEFAULT_ARCHETYPE;
 

@@ -16,13 +16,10 @@ use Symfony\Component\HttpFoundation\Response;
  *
  *   GET /api/v1/plugins/team-graph/graph?principal_id=<id>
  *
- * The principal-id gate is enforced in
- * {@see TeamGraphService::buildGraph()} via
- * `PrincipalService::visiblePrincipalIdsFor()` — the membership rule
- * `GET /api/v1/principals/me` uses, so the panel's own principal picker
- * cannot offer a principal this endpoint refuses. This controller surfaces
- * the 403 envelope when the service refuses. `CsrfMiddleware` is a no-op on
- * GET, so the chain effectively enforces "logged-in caller" only.
+ * The principal gate lives in {@see TeamGraphService::buildGraph()}; this
+ * controller surfaces the 403 envelope when the service refuses.
+ * `CsrfMiddleware` is a no-op on GET, so the chain effectively enforces
+ * "logged-in caller" only.
  */
 final class TeamGraphController
 {
@@ -31,7 +28,7 @@ final class TeamGraphController
         private readonly TeamGraphService $service,
     ) {}
 
-    public function graph(Request $request): JsonResponse // NOSONAR php:S1142 — the returns are guard clauses: unauthenticated / invalid input / refused, each returning its own status+body, and collapsing them would nest the happy path under two error branches to save one `return`
+    public function graph(Request $request): JsonResponse // NOSONAR php:S1142 — the returns are guard clauses (unauthenticated / invalid input / refused), each returning its own status+body, and collapsing them would nest the happy path under two error branches to save one `return`
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null) {
