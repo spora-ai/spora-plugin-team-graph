@@ -16,7 +16,9 @@ use Delight\Auth\Auth as DelightAuth;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Mockery as M;
 use Spora\Auth\AuthService;
+use Spora\Core\Config;
 use Spora\Core\Database;
+use Spora\Core\DatabaseSchemaInstaller;
 
 if (!defined('BASE_PATH')) {
     define('BASE_PATH', dirname(__DIR__));
@@ -113,8 +115,19 @@ function createUserPrincipal(int $userId): int
 uses()
     ->beforeEach(function () {
         Database::resetBootState();
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => ':memory:']);
-        $db->boot();
+        // The core migration set, not a plugin one: the plugin owns no
+        // tables, but its tests read and write `users`, `principals` and
+        // `agents`.
+        //
+        // The installer is given no stamp path, so it installs the schema
+        // on every test instead of caching "already installed" in a file
+        // that a second test would then honour and leave the tables
+        // missing.
+        $tmpDb = sys_get_temp_dir() . '/spora-plugin-team-graph-' . bin2hex(random_bytes(4)) . '.sqlite';
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => $tmpDb]));
+        $db->bootDatabaseConnectionOnly();
+
+        (new DatabaseSchemaInstaller(null, null, null))->install();
 
         Capsule::connection()->beginTransaction();
     })
