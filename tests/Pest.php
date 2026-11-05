@@ -99,8 +99,8 @@ uses()
     ->beforeEach(function () {
         Database::resetBootState();
         // The core migration set, not a plugin one: the plugin owns no
-        // tables, but its tests read and write `users`, `principals` and
-        // `agents`.
+        // tables, but its tests read and write core tables like `users`,
+        // `principals` and `agents`.
         //
         // The installer is given no stamp path, so it installs the schema
         // on every test instead of caching "already installed" in a file
