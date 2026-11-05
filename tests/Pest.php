@@ -2,16 +2,6 @@
 
 declare(strict_types=1);
 
-/*
-|--------------------------------------------------------------------------
-| Pest Bootstrap
-|--------------------------------------------------------------------------
-|
-| Plugin-local test helpers and global Pest hooks: a fresh in-memory
-| SQLite per test, rolled back in afterEach.
-|
-*/
-
 use Delight\Auth\Auth as DelightAuth;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Mockery as M;
@@ -38,8 +28,8 @@ set_error_handler(static function (...$handlerArgs): bool {
 }, E_DEPRECATED);
 
 /**
- * Boot a fresh in-memory SQLite database and return a ready-to-use
- * AuthService. Throttling is disabled so tests never hit rate limits.
+ * Return an AuthService over the test database. Throttling is disabled so
+ * tests never hit rate limits.
  */
 function bootAuthLayer(): AuthService
 {
@@ -49,9 +39,6 @@ function bootAuthLayer(): AuthService
     return new AuthService($auth);
 }
 
-/**
- * Create a JSON Request with an optional body array.
- */
 function jsonRequest(string $method, string $uri, array $body = []): Symfony\Component\HttpFoundation\Request
 {
     $content = $body !== [] ? json_encode($body) : '';
@@ -68,8 +55,7 @@ function jsonRequest(string $method, string $uri, array $body = []): Symfony\Com
 }
 
 /**
- * Simulate a logged-in session by populating the PHP session
- * superglobal the same way delight-im/auth does internally.
+ * Simulate a logged-in session the way delight-im/auth does internally.
  */
 function simulateLoggedInSession(int $userId, string $email): void
 {
@@ -99,11 +85,8 @@ function bootAuth(AuthService $authService, string $email = 'test@example.com', 
 }
 
 /**
- * Materialise a user-principal row for the given user id via
- * PrincipalService::ensureUserPrincipal and return the principal id.
- *
- * Idempotent: returns the existing principal id when one already
- * exists for this user.
+ * Idempotent: returns the existing principal id when one already exists for
+ * this user.
  */
 function createUserPrincipal(int $userId): int
 {
