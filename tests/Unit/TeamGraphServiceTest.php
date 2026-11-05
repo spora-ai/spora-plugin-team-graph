@@ -16,8 +16,8 @@ use Spora\Tools\SubAgentTool;
 /**
  * Integration coverage for {@see TeamGraphService}. The resolvers are
  * `final`, so they cannot be mocked; the tests drive the service
- * against the same in-memory SQLite the feature suite uses, seeded with
- * the rows each scenario needs.
+ * against the same temporary SQLite database the feature suite uses,
+ * seeded with the rows each scenario needs.
  *
  * `ToolConfigServiceInterface` is mocked so each scenario can script its
  * own `allowed_target_agents` per agent.
