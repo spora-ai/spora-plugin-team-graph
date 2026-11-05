@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "a1fb05f5806fe404df19cf4d5132fd20",
+    "content-hash": "d4bd7d43cbacaca0bf1ce161ad73ad66",
     "packages": [
         {
             "name": "brick/math",
@@ -3062,16 +3062,16 @@
         },
         {
             "name": "spora-ai/spora-core",
-            "version": "v0.28.0",
+            "version": "v0.32.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/spora-ai/spora-core.git",
-                "reference": "e48462595a59f17fef3c42a0e0927576c2e8dca9"
+                "reference": "f1789b0047d386ffd4d379faa9e227db25c985d5"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/spora-ai/spora-core/zipball/e48462595a59f17fef3c42a0e0927576c2e8dca9",
-                "reference": "e48462595a59f17fef3c42a0e0927576c2e8dca9",
+                "url": "https://api.github.com/repos/spora-ai/spora-core/zipball/f1789b0047d386ffd4d379faa9e227db25c985d5",
+                "reference": "f1789b0047d386ffd4d379faa9e227db25c985d5",
                 "shasum": ""
             },
             "require": {
@@ -3135,6 +3135,7 @@
             "autoload-dev": {
                 "files": [
                     "tests/Support/CrossFileTestHelpers.php",
+                    "tests/Support/I18nTestSupport.php",
                     "tests/Support/TestDatabaseFactory.php"
                 ],
                 "psr-4": {
@@ -3144,6 +3145,8 @@
                     "Tests\\Fixtures\\Plugins\\ManifestPlugin\\": "tests/Fixtures/plugins_with_manifest/ManifestPlugin/",
                     "Tests\\Fixtures\\Plugins\\NamedPlugin\\": "tests/Fixtures/plugins_with_custom_file/NamedPlugin/",
                     "Tests\\Fixtures\\Plugins\\ToolsPlugin\\": "tests/Fixtures/plugins_with_tools/ToolsPlugin/",
+                    "Tests\\Fixtures\\Plugins\\SkillsPlugin\\": "tests/Fixtures/plugins_with_skills/SkillsPlugin/",
+                    "Tests\\Fixtures\\Plugins\\SkillsPluginTwo\\": "tests/Fixtures/plugins_with_skills_more/SkillsPluginTwo/",
                     "Tests\\Fixtures\\Plugins\\MigratingPlugin\\": "tests/Fixtures/plugins_with_migrations/MigratingPlugin/",
                     "Tests\\Fixtures\\Plugins\\InventoryPlugin\\": "tests/Fixtures/plugins_inventory/InventoryPlugin/",
                     "Tests\\Fixtures\\Plugins\\SpeechProviderPlugin\\": "tests/Fixtures/plugins_with_speech_provider/SpeechProviderPlugin/src/",
@@ -3197,6 +3200,12 @@
                 ],
                 "openapi:check": [
                     "@php bin/spora-build openapi:check"
+                ],
+                "i18n:extract": [
+                    "@php bin/spora-build i18n:extract"
+                ],
+                "i18n:check": [
+                    "@php bin/spora-build i18n:check"
                 ]
             },
             "license": [
@@ -3204,10 +3213,10 @@
             ],
             "description": "A portable, zero-configuration AI agent orchestration platform that runs on any shared host (cPanel/FTP) without system dependencies beyond PHP 8.4+.",
             "support": {
-                "source": "https://github.com/spora-ai/spora-core/tree/v0.28.0",
+                "source": "https://github.com/spora-ai/spora-core/tree/v0.32.0",
                 "issues": "https://github.com/spora-ai/spora-core/issues"
             },
-            "time": "2026-09-25T10:45:03+00:00"
+            "time": "2026-10-29T20:06:27+00:00"
         },
         {
             "name": "spora-ai/spora-plugin-team-graph-frontend",
@@ -10326,9 +10335,7 @@
     ],
     "aliases": [],
     "minimum-stability": "dev",
-    "stability-flags": {
-        "spora-ai/spora-core": 20
-    },
+    "stability-flags": {},
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

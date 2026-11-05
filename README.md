@@ -133,14 +133,15 @@ composer test:parallel
 The suite covers:
 
 * `TeamGraphServiceTest` — drives the service, both resolvers and the
-  envelope against the same in-memory SQLite the feature suite uses, with
-  only `ToolConfigServiceInterface` mocked so each scenario can script its
-  own allowlist. Areas: node aggregates and status, configured-vs-observed
-  edge emission, `tool_calls` enrichment, cross-principal and archived
-  filtering, `profile_picture` wire shape (palette fallback, `variant_key`
-  derivation), and the principal-visibility refusal.
-* `TeamGraphControllerTest` — feature tests against an in-memory SQLite
-  (auth gate, principal visibility per group role, validation).
+  envelope against the same temporary SQLite database the feature suite
+  uses, with only `ToolConfigServiceInterface` mocked so each scenario can
+  script its own allowlist. Areas: node aggregates and status,
+  configured-vs-observed edge emission, `tool_calls` enrichment,
+  cross-principal and archived filtering, `profile_picture` wire shape
+  (palette fallback, `variant_key` derivation), and the
+  principal-visibility refusal.
+* `TeamGraphControllerTest` — feature tests against a temporary SQLite
+  database (auth gate, principal visibility per group role, validation).
 * `TeamGraphPluginTest` — wiring: event subscriptions, the DI bindings, the
   registered route with its middleware, and the app's `VueAppInterface`
   contract.

@@ -4,6 +4,15 @@ name: CI
 # attacks via tag reassignment. Run `gh api repos/OWNER/REPO/git/refs/tags/vN`
 # to look up the current SHA when upgrading.
 
+# Every job resolves spora-core with `composer update spora-ai/spora-core
+# --with-all-dependencies`, not `composer install`. `install` replays the
+# committed lock, which pinned core v0.28.0 until this change — and that is
+# how this plugin's test harness kept working after core changed `Database`'s
+# constructor. The lock hid the constraint instead of proving it, and the
+# constraint was wrong: it admitted core versions the plugin's source cannot
+# use. Resolving the declared constraint against the sources it names is what
+# makes a green run mean the constraint is satisfiable.
+
 on:
   push:
     branches: [main]
@@ -35,8 +44,8 @@ jobs:
           coverage: none
           tools: composer
 
-      - name: Composer install
-        run: composer install --no-interaction --prefer-dist
+      - name: Resolve spora-core against the declared floor
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist # NOSONAR githubactions:S8546 — floating versions are the point: this job must resolve the declared >=0.25.0 floor against whatever the core repository actually serves, not replay a lock
 
       - name: Run Pest
         run: ./vendor/bin/pest
@@ -55,8 +64,8 @@ jobs:
           coverage: none
           tools: composer
 
-      - name: Composer install
-        run: composer install --no-interaction --prefer-dist
+      - name: Resolve spora-core against the declared floor
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist # NOSONAR githubactions:S8546 — floating versions are the point: this job must resolve the declared >=0.25.0 floor against whatever the core repository actually serves, not replay a lock
 
       - name: Run PHPStan
         run: ./vendor/bin/phpstan analyse --no-progress
@@ -75,8 +84,8 @@ jobs:
           coverage: none
           tools: composer
 
-      - name: Composer install
-        run: composer install --no-interaction --prefer-dist
+      - name: Resolve spora-core against the declared floor
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist # NOSONAR githubactions:S8546 — floating versions are the point: this job must resolve the declared >=0.25.0 floor against whatever the core repository actually serves, not replay a lock
 
       - name: Check code style
         # Same ruleset as Spora core's .php-cs-fixer.php so plugin style matches host.
@@ -99,8 +108,8 @@ jobs:
           coverage: xdebug
           tools: composer
 
-      - name: Composer install
-        run: composer install --no-interaction --prefer-dist
+      - name: Resolve spora-core against the declared floor
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist # NOSONAR githubactions:S8546 — floating versions are the point: this job must resolve the declared >=0.25.0 floor against whatever the core repository actually serves, not replay a lock
 
       - name: Generate clover coverage report
         # The source filter lives in phpunit.xml's `<source>` block, not on

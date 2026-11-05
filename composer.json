@@ -5,7 +5,7 @@
     "license": "MIT",
     "require": {
         "php": "^8.4.1",
-        "spora-ai/spora-core": ">=0.23.0 <2.0.0 || @dev",
+        "spora-ai/spora-core": ">=0.25.0 <2.0.0",
         "spora-ai/spora-plugin-team-graph-frontend": ">=0.1.0 <2.0.0"
     },
     "require-dev": {
