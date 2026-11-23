@@ -6,7 +6,7 @@ name: CI
 
 # Every job resolves spora-core with `composer update spora-ai/spora-core
 # --with-all-dependencies`, not `composer install`. `install` replays the
-# committed lock, which pinned core v0.28.0 until this change — and that is
+# committed lock, which pinned an old core until this change — and that is
 # how this plugin's test harness kept working after core changed `Database`'s
 # constructor. The lock hid the constraint instead of proving it, and the
 # constraint was wrong: it admitted core versions the plugin's source cannot
